@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections.abc import Iterable
-from training_of_tokenizer import load_with_pickle
+from cs336_basics.training_of_tokenizer import load_with_pickle
 
 # Tokenization follows the training process closely, in the sense that new inputs are tokenized by applying the following steps:
 #
@@ -47,32 +47,6 @@ class Trie:
         return longest
 
 
-def greedy_longest_match_with_trie(text: str, patterns: set[str]) -> list[str]:
-    """
-    使用Trie树优化的贪婪最长匹配
-    """
-    # 构建Trie树
-    trie = Trie()
-    for pattern in patterns:
-        trie.insert(pattern)
-
-    result = []
-    i = 0
-    n = len(text)
-
-    while i < n:
-        # 查找从i开始的最长匹配
-        match = trie.longest_match(text, i)
-
-        if match:
-            result.append(match)
-            i += len(match)
-        else:
-            # 没有匹配，处理单个字符
-            result.append(text[i])
-            i += 1
-
-    return result
 class tokenizer:
     def __init__(self,vocab: dict[int,bytes],merges: list[tuple[bytes,bytes]],special_tokens: list[str] | None=None):
         self.vocab = vocab
@@ -93,17 +67,9 @@ class tokenizer:
         
         # 遍历词汇表，将每个字节序列解码为字符串用于Trie树构建
         for token_id, byte_seq in self.vocab.items():
-            if isinstance(byte_seq, bytes):
-                try:
-                    # 尝试用UTF-8解码
-                    decoded_str = byte_seq.decode("utf-8")
-                except UnicodeDecodeError:
-                    # 如果UTF-8失败，使用latin-1（它可以解码任何字节）
-                    decoded_str = byte_seq.decode("latin-1")
-                trie.insert(decoded_str)
-            else:
-                # 如果不是bytes类型（不太可能），则转换为字符串
-                trie.insert(str(byte_seq))
+            # 尝试用UTF-8解码
+            decoded_str = byte_seq.decode("utf-8",errors="replace")
+            trie.insert(decoded_str)
 
         result = []
         i = 0
@@ -118,11 +84,8 @@ class tokenizer:
                 matched_id = None
                 for token_id, byte_seq in self.vocab.items():
                     if isinstance(byte_seq, bytes):
-                        try:
-                            decoded_str = byte_seq.decode("utf-8")
-                        except UnicodeDecodeError:
-                            decoded_str = byte_seq.decode("latin-1")
-                        
+                        decoded_str = byte_seq.decode("utf-8",errors="replace")
+
                         if decoded_str == match:
                             matched_id = token_id
                             break
@@ -143,18 +106,7 @@ class tokenizer:
                             result.append(token_id)
                             char_found = True
                             break
-                    
-                    if not char_found:
-                        # 如果字符不在词汇表中，尝试用latin-1编码
-                        char_to_encode_alt = token[i].encode("latin-1")
-                        for token_id, byte_seq in self.vocab.items():
-                            if byte_seq == char_to_encode_alt:
-                                result.append(token_id)
-                                char_found = True
-                                break
-                        
-                        if not char_found:
-                            raise ValueError(f"Character '{token[i]}' not in vocabulary")
+
                     
                     i += 1
             else:
@@ -166,18 +118,7 @@ class tokenizer:
                         result.append(token_id)
                         char_found = True
                         break
-                
-                if not char_found:
-                    # 如果UTF-8编码未找到，尝试latin-1编码
-                    char_to_encode_alt = token[i].encode("latin-1")
-                    for token_id, byte_seq in self.vocab.items():
-                        if byte_seq == char_to_encode_alt:
-                            result.append(token_id)
-                            char_found = True
-                            break
-                    
-                    if not char_found:
-                        raise ValueError(f"Character '{token[i]}' not in vocabulary")
+
                 
                 i += 1
 
@@ -206,11 +147,8 @@ class tokenizer:
             if id in self.vocab:
                 byte_seq = self.vocab[id]
                 if isinstance(byte_seq, bytes):
-                    try:
-                        str_result += byte_seq.decode("utf-8")
-                    except UnicodeDecodeError:
-                        # 如果UTF-8解码失败，使用latin-1
-                        str_result += byte_seq.decode("latin-1")
+                    str_result += byte_seq.decode("utf-8",errors="replace")
+
                 else:
                     str_result += str(byte_seq)
             else:
@@ -225,7 +163,7 @@ if __name__ == "__main__":
         print("Vocabulary loaded successfully")
         print(f"Vocabulary size: {len(vocab)}")
         print(f"Merges size: {len(merges)}")
-        tokenizer_instance=tokenizer(vocab,merges)
+        tokenizer_instance=tokenizer(vocab,merges,['<|endoftext|>'])
         print("Tokenizer initialized successfully")
         test_token = "hello, I am Tom. How's your day?"
         encoded = tokenizer_instance.encode_one_token(test_token)

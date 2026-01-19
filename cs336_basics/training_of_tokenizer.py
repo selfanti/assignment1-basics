@@ -1,4 +1,6 @@
-from pretokenization_example import parallel_file_processing
+from __future__ import annotations  # 添加这行以支持类型注解中的前向引用
+
+from cs336_basics.pretokenization_example import parallel_file_processing
 import os
 import pickle
 import gzip
@@ -75,6 +77,6 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
     return vocab, merges
     
 if __name__ == "__main__":
-    vocab,merges=train_bpe(r"D:\python_project\assignment1-basics\data\owt_train\test.txt", 1000, ['<|endoftext|>'])
+    vocab,merges=train_bpe(r"D:\python_project\assignment1-basics\data\owt_train\test.txt", 1000, [''])
     save_with_pickle(vocab, r"D:\python_project\assignment1-basics\data\owt_train\test_vocab.pkl")
     save_with_pickle(merges, r"D:\python_project\assignment1-basics\data\owt_train\test_merges.pkl")

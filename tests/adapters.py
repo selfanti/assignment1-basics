@@ -9,6 +9,8 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
+# 导入tokenizer.py中的类
+from cs336_basics.tokenizer import tokenizer
 
 def run_linear(
     d_in: int,
@@ -159,7 +161,6 @@ def run_multihead_self_attention_with_rope(
     implementation. This implementation should handle the key, query, and value projections
     for all heads in a single matrix multiply.
     This version of MHA should include RoPE.
-    In this case, the RoPE embedding dimension must be the head embedding dimension (d_model // num_heads).
     See section 3.2.2 of Vaswani et al., 2017.
 
     Args:
@@ -559,7 +560,8 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    # 使用导入的tokenizer类创建并返回一个tokenizer实例
+    return tokenizer(vocab, merges, special_tokens)
 
 
 def run_train_bpe(

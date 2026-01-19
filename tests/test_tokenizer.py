@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-import resource
+# Resource module is only available on Unix systems
+try:
+    import resource
+except ImportError:
+    resource = None
+
 import sys
 
 import psutil
@@ -19,6 +24,10 @@ MERGES_PATH = FIXTURES_PATH / "gpt2_merges.txt"
 def memory_limit(max_mem):
     def decorator(f):
         def wrapper(*args, **kwargs):
+            if resource is None:
+                # Skip memory limiting on platforms where resource module is not available
+                return f(*args, **kwargs)
+            
             process = psutil.Process(os.getpid())
             prev_limits = resource.getrlimit(resource.RLIMIT_AS)
             resource.setrlimit(resource.RLIMIT_AS, (process.memory_info().rss + max_mem, -1))
