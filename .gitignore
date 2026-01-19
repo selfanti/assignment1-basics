@@ -162,4 +162,3 @@ cython_debug/
 *.zip
 # data for training and files from pickle
 data/**
-.git/**
