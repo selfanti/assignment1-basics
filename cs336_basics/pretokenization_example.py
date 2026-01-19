@@ -1,6 +1,18 @@
 import os
 from typing import BinaryIO
-
+import multiprocessing as mp
+from typing import List
+import time
+import re
+def add_dicts(dicts: list[dict]) -> dict:
+    result={}
+    for dict in dicts:
+        for key, value in dict.items():
+            if key in result:
+                result[key] += value
+            else:
+                result[key] = value
+    return result
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -37,7 +49,6 @@ def find_chunk_boundaries(
             if mini_chunk == b"":
                 chunk_boundaries[bi] = file_size
                 break
-
             # Find the special token in the mini chunk
             found_at = mini_chunk.find(split_special_token)
             if found_at != -1:
@@ -49,14 +60,55 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-## Usage
-with open(..., "rb") as f:
-    num_processes = 4
-    boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
+
+
+def process_chunk(start_end: tuple, filename: str, token: bytes):
+    """处理单个块的函数（可在不同进程中运行）"""
+    with open(filename, "rb") as f:
+        start, end = start_end
         f.seek(start)
-        chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
+        chunk_data = f.read(end - start)
+        text = chunk_data.decode("utf-8", errors="ignore")
+        # 进行实际的处理，如tokenization
+        text=text.replace("<|endoftext|>","")
+        tokens =re.finditer(r'\w+|[^\w\s]', text, re.MULTILINE)
+        dicts={}
+        for match in tokens:
+            match_str=match.group()
+            if match.group() not in dicts:
+
+                dicts[tuple(char.encode('utf-8') for char in match_str)]=0
+            dicts[tuple(char.encode('utf-8') for char in match_str)]+=1
+        return dicts
+
+
+def parallel_file_processing(filename: str, num_processes: int = 4):
+    """并行处理文件的完整示例"""
+    with open(filename, "rb") as f:
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+
+    # 创建(start, end)对列表
+    chunks = list(zip(boundaries[:-1], boundaries[1:]))
+
+    # 使用进程池并行处理
+    with mp.Pool(num_processes) as pool:
+        # 每个进程处理一个块
+        results = pool.starmap(
+            process_chunk,
+            [(chunk, filename, b"<|endoftext|>") for chunk in chunks]
+        )
+
+    # 汇总结果
+    total_tokens_dicts = add_dicts(results)
+    print("预分词完毕")
+    return total_tokens_dicts
+
+## Usage
+if __name__ == "__main__":
+    start_time=time.perf_counter()
+    total_tokens = parallel_file_processing(r"D:\python_project\assignment1-basics\data\owt_train\test.txt",8)
+    end_time = time.perf_counter()
+    print(f"将大文件分块并且按照空格进行预分词耗时: {end_time-start_time:.9f} 秒")  # 纳秒精度
+    print(f"token总数: {len(total_tokens)}")
+
