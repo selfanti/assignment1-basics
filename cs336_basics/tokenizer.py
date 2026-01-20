@@ -100,11 +100,9 @@ class tokenizer:
                 else:
                     # 如果找不到匹配项，按字符编码
                     char_to_encode = token[i].encode("utf-8")
-                    char_found = False
                     for token_id, byte_seq in self.vocab.items():
                         if byte_seq == char_to_encode:
                             result.append(token_id)
-                            char_found = True
                             break
 
                     
@@ -116,7 +114,6 @@ class tokenizer:
                 for token_id, byte_seq in self.vocab.items():
                     if byte_seq == char_to_encode:
                         result.append(token_id)
-                        char_found = True
                         break
 
                 
@@ -124,37 +121,86 @@ class tokenizer:
 
         return result
 
-    def encode(self,text: str)->list[int]:
-        # 实现文本编码逻辑
+    def pretokenize(self, text: str) -> list[str]:
+        """
+        预分词处理，将文本分割为token，保留空格与后续非空字符的组合
+        """
+        import re
+        # 使用正则表达式分割文本，保留空格与后续内容的组合
+        parts = re.split(r'(\s*)(\S+)', text)
+        
+        # 清理parts数组，移除空字符串，但保留有意义的部分
+        result_parts = []
+        i = 0
+        while i < len(parts):
+            if i < len(parts) and parts[i]:  # 如果当前部分不为空
+                if i + 2 < len(parts) and parts[i].isspace():  # 如果当前部分是空格
+                    # 组合空格和下一个非空部分
+                    combined_part = parts[i] + parts[i+1]
+                    result_parts.append(combined_part)
+                    i += 3  # 跳过空格、下一个部分和随后的空字符串
+                elif not parts[i].isspace():  # 如果不是空格也不是空字符串
+                    result_parts.append(parts[i])
+                    i += 1
+                else:  # 单独的空格部分
+                    result_parts.append(parts[i])
+                    i += 1
+            else:
+                i += 1
+        
+        # 过滤掉空字符串，只保留有意义的部分
+        result_parts = [part for part in result_parts if part]
+        return result_parts
+
+    def encode(self, text: str) -> list[int]:
+        # 使用预分词函数处理文本
+        pre_tokens = self.pretokenize(text)
+        
         results = []
-        # 预分词步骤 - 简单地按空格分割
-        pre_tokens = text.split()  
         for token in pre_tokens:
-            token_ids = self.encode_one_token(token)
-            results.extend(token_ids)
-            # 注意：这里不会添加空格标记，除非空格本身在词汇表中
+            if token:  # 忽略空字符串
+                token_ids = self.encode_one_token(token)
+                results.extend(token_ids)
         return results
 
-    def encode_iterable(self,iterable: Iterable[str])-> Iterable[int]:
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
         results = []
         for item in iterable:
             results.extend(self.encode(item))
         return results
 
-    def decode(self,ids: list[int])->str:
+    def decode(self, ids: list[int]) -> str:
         str_result = ""
-        for id in ids:
+        for i, id in enumerate(ids):
             if id in self.vocab:
                 byte_seq = self.vocab[id]
                 if isinstance(byte_seq, bytes):
-                    str_result += byte_seq.decode("utf-8",errors="replace")
-
+                    token_str = byte_seq.decode("utf-8", errors="replace")
+                    str_result += token_str
                 else:
                     str_result += str(byte_seq)
             else:
                 # 如果ID不在词汇表中，抛出错误
                 raise ValueError(f"ID {id} not in vocabulary")
         return str_result
+
+    def decode_with_spaces(self, ids: list[int]) -> str:
+        # 实现一个新方法，将ID列表转换为token，然后在它们之间添加空格
+        tokens = []
+        for id in ids:
+            if id in self.vocab:
+                byte_seq = self.vocab[id]
+                if isinstance(byte_seq, bytes):
+                    token = byte_seq.decode("utf-8", errors="replace")
+                else:
+                    token = str(byte_seq)
+                tokens.append(token)
+            else:
+                # 如果ID不在词汇表中，抛出错误
+                raise ValueError(f"ID {id} not in vocabulary")
+        
+        # 在tokens之间添加空格
+        return " ".join(tokens)
 
 if __name__ == "__main__":
     try:
@@ -163,10 +209,10 @@ if __name__ == "__main__":
         print("Vocabulary loaded successfully")
         print(f"Vocabulary size: {len(vocab)}")
         print(f"Merges size: {len(merges)}")
-        tokenizer_instance=tokenizer(vocab,merges,['<|endoftext|>'])
+        tokenizer_instance=tokenizer(vocab,merges,[''])
         print("Tokenizer initialized successfully")
-        test_token = "hello, I am Tom. How's your day?"
-        encoded = tokenizer_instance.encode_one_token(test_token)
+        test_token = "hello, I am Tom. How's your day? Make sure the .pkl files exist at the specified paths."
+        encoded = tokenizer_instance.encode(test_token)
         print(f"Encoded '{test_token}': {encoded}")
         decoded = tokenizer_instance.decode(encoded)
         print(f"Decoded back: '{decoded}'")
