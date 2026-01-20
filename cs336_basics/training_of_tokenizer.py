@@ -77,6 +77,6 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
     return vocab, merges
     
 if __name__ == "__main__":
-    vocab,merges=train_bpe(r"D:\python_project\assignment1-basics\data\owt_train\test.txt", 1000, [''])
-    save_with_pickle(vocab, r"D:\python_project\assignment1-basics\data\owt_train\test_vocab.pkl")
-    save_with_pickle(merges, r"D:\python_project\assignment1-basics\data\owt_train\test_merges.pkl")
+    vocab,merges=train_bpe("test.txt", 1000, [''])
+    save_with_pickle(vocab, "test_vocab.pkl")
+    save_with_pickle(merges, "test_merges.pkl")

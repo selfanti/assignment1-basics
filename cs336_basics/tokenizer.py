@@ -158,8 +158,8 @@ class tokenizer:
 
 if __name__ == "__main__":
     try:
-        vocab=load_with_pickle(r"D:\python_project\assignment1-basics\data\owt_train\test_vocab.pkl")
-        merges=load_with_pickle(r"D:\python_project\assignment1-basics\data\owt_train\test_merges.pkl")
+        vocab=load_with_pickle("test_vocab.pkl")
+        merges=load_with_pickle("test_merges.pkl")
         print("Vocabulary loaded successfully")
         print(f"Vocabulary size: {len(vocab)}")
         print(f"Merges size: {len(merges)}")
