@@ -219,6 +219,8 @@ def test_unicode_string_matches_tiktoken():
 
     reference_ids = reference_tokenizer.encode(test_string)
     ids = tokenizer.encode(test_string)
+    print(reference_ids,' : ',ids)
+    print(reference_tokenizer.decode(reference_ids),' : ',tokenizer.decode(ids))
     assert ids == reference_ids
 
     assert tokenizer.decode(ids) == test_string
