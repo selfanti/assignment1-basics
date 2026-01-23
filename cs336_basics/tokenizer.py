@@ -97,18 +97,35 @@ class tokenizer:
         self.vocab = vocab
         self.merges=merges
         self.special_tokens = special_tokens or []
-        self.reverse_vocab = {v: k for k, v in self.vocab.items()}
+        
         # 构建Trie树
         self.trie = Trie()
         # 需要从vocab构建GPT-2映射的Unicode字符序列
         self.byte_to_unicode = gpt2_bytes_to_unicode()
         self.unicode_to_byte = {v: k for k, v in self.byte_to_unicode.items()}
+        for token_id, byte_seq in self.vocab.items():
+            new_str=''.join([self.byte_to_unicode[b] for b in byte_seq])
+            self.vocab[token_id]=new_str.encode('utf-8')
+        self.reverse_vocab = {v: k for k, v in self.vocab.items()}
+            
         # 将字节序列转换为GPT-2映射的Unicode字符序列并插入Trie
         for token_id, byte_seq in self.vocab.items():
             if isinstance(byte_seq, bytes):
                 # 将字节序列转换为GPT-2映射的Unicode字符序列
-                token_str=byte_seq.decode('utf-8')
-                self.trie.insert(token_str)
+                gpt2_unicode_str = byte_seq.decode('utf-8')
+                self.trie.insert(gpt2_unicode_str)
+                # token_str = byte_seq.decode('utf-8')
+                # self.trie.insert(token_str)
+        
+        gpt2_merges=[]
+        for merge in self.merges:
+            gpt2_unicode_bytes_first = ''.join([self.byte_to_unicode[b] for b in merge[0]]).encode('utf-8')
+            gpt2_unicode_bytes_second = ''.join([self.byte_to_unicode[b] for b in merge[1]]).encode('utf-8')
+            gpt2_merges.append((gpt2_unicode_bytes_first, gpt2_unicode_bytes_second))
+        self.merges=tuple(gpt2_merges)
+
+
+
 
     def from_files(self,vocab_filepath: str,merges_filepath: str,special_tokens: list[str] | None=None):
         self.vocab=load_with_pickle(vocab_filepath)
@@ -117,7 +134,6 @@ class tokenizer:
         self.reverse_vocab={v:k for k,v in self.vocab.items()}
         # 重建Trie树
         self.trie = Trie()
-        
         byte_to_unicode = gpt2_bytes_to_unicode()
         
         # 将字节序列转换为GPT-2映射的Unicode字符序列并插入Trie
@@ -337,16 +353,17 @@ if __name__ == "__main__":
         #vocab=load_with_pickle("test_vocab.pkl")
         vocab=load_json_file1("/home/tao/assignment1-basics/tests/fixtures/gpt2_vocab.json")
         vocab={v:k.encode('utf-8') for k,v in vocab.items()} # int : string
-        with open('dict_output.txt', 'w', encoding='utf-8') as f:
-            for key, value in vocab.items():
-                f.write(f'{key}: {value}\n')
+        
+        # with open('dict_output.txt', 'w', encoding='utf-8') as f:
+        #     for key, value in vocab.items():
+        #         f.write(f'{key}: {value}\n')
         merges=read_bpe_merge_file("/home/tao/assignment1-basics/tests/fixtures/gpt2_merges.txt")
         print("Vocabulary loaded successfully")
         print(f"Vocabulary size: {len(vocab)}")
         print(f"Merges size: {len(merges)}")
         tokenizer_instance=tokenizer(vocab,merges,[])
         print("Tokenizer initialized successfully")
-        test_token = " "
+        test_token = "Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
         print('preo token:',tokenizer_instance.pretokenize(test_token))
         encoded = tokenizer_instance.encode(test_token)
         print(f"Encoded '{test_token}': {encoded}")
