@@ -3,7 +3,7 @@ from typing import BinaryIO
 import multiprocessing as mp
 from typing import List
 import time
-import re
+import regex as re
 def add_dicts(dicts: list[dict]) -> dict:
     result={}
     for dict in dicts:
@@ -72,7 +72,7 @@ def process_chunk(start_end: tuple, filename: str, token: bytes):
         text = chunk_data.decode("utf-8", errors="ignore")
         # 进行实际的处理，如tokenization
         text=text.replace("<|endoftext|>","")
-        tokens =re.finditer(r'\w+|[^\w\s]', text, re.MULTILINE)
+        tokens =re.finditer(r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""", text, re.MULTILINE)
         dicts={}
         for match in tokens:
             match_str=match.group()
@@ -107,7 +107,7 @@ def parallel_file_processing(filename: str, num_processes: int = 4):
 ## Usage
 if __name__ == "__main__":
     start_time=time.perf_counter()
-    total_tokens = parallel_file_processing(r"D:\python_project\assignment1-basics\data\owt_train\test.txt",8)
+    total_tokens = parallel_file_processing("/home/tao/assignment1-basics/tests/fixtures/tinystories_sample.txt",8)
     end_time = time.perf_counter()
     print(f"将大文件分块并且按照空格进行预分词耗时: {end_time-start_time:.9f} 秒")  # 纳秒精度
     print(f"token总数: {len(total_tokens)}")

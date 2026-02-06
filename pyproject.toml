@@ -20,6 +20,7 @@ dependencies = [
     "wandb>=0.19.7",
     "ty>=0.0.1a16",
     "resource>=0.2.1",
+    "anthropic>=0.76.0",
 ]
 
 [build-system]

@@ -13,7 +13,7 @@
             "module": "pytest",
             "args": [
                 "-v",
-                "tests/test_tokenizer.py::test_unicode_string_matches_tiktoken"
+                "tests/test_tokenizer.py"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",

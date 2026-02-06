@@ -164,6 +164,8 @@ def test_single_unicode_character_matches_tiktoken():
 
     reference_ids = reference_tokenizer.encode(test_string)
     ids = tokenizer.encode(test_string)
+    string_by_my=tokenizer.decode(ids) 
+    print(string_by_my)
     assert ids == reference_ids
 
     assert tokenizer.decode(ids) == test_string
@@ -368,6 +370,7 @@ def test_encode_special_token_trailing_newlines():
     with open(corpus_path) as f:
         corpus_contents = f.read()
     reference_ids = reference_tokenizer.encode(corpus_contents, allowed_special={"<|endoftext|>"})
+    print(reference_ids,reference_tokenizer.decode(reference_ids))
     ids = tokenizer.encode(corpus_contents)
     assert ids == reference_ids
 
