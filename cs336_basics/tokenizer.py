@@ -45,7 +45,7 @@ class Trie:
 
 
 class tokenizer:
-    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None):
+    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None,remapping:bool=False):
         self.vocab = vocab
         self.merges = merges
         self.special_tokens = special_tokens or []
@@ -358,7 +358,7 @@ if __name__ == "__main__":
         tokenizer_instance = tokenizer(vocab, merges, [])
         print("Tokenizer initialized successfully")
         
-        test_token = "🙃"
+        test_token = "Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
         #"Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
         print('preo token:', tokenizer_instance.pretokenize(test_token))
         encoded = tokenizer_instance.encode(test_token)
