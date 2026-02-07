@@ -73,9 +73,7 @@ class tokenizer:
         # Pre-compute merge order for O(1) lookup during encoding
         self._merge_order: dict[tuple[bytes, bytes], int] = {}
         for i, merge in enumerate(self.merges):
-            merge_gpt2 = (''.join([self.byte_to_unicode[b] for b in merge[0]]).encode('utf-8'),
-                         ''.join([self.byte_to_unicode[b] for b in merge[1]]).encode('utf-8'))
-            self._merge_order[merge_gpt2] = i
+            self._merge_order[merge] = i
         
         # Build Trie tree for tokenization
         self.trie = Trie()
@@ -83,6 +81,8 @@ class tokenizer:
             if isinstance(byte_seq, bytes):
                 gpt2_unicode_str = ''.join([self.byte_to_unicode[b] for b in byte_seq])
                 self.trie.insert(gpt2_unicode_str)
+        print('self.vocab[1]',self.vocab[1])
+        print('self.merges[8326]',self.merges[8326])
 
     def from_files(self, vocab_filepath: str, merges_filepath: str, special_tokens: list[str] | None = None):
         self.vocab = load_with_pickle(vocab_filepath)
@@ -115,66 +115,66 @@ class tokenizer:
                 gpt2_unicode_str = ''.join([self.byte_to_unicode[b] for b in byte_seq])
                 self.trie.insert(gpt2_unicode_str)
 
-    def encode_one_token(self, token: str) -> list[int]:
-        # Convert input token to UTF-8 bytes, then to GPT2 unicode
-        utf8_bytes = token.encode("utf-8")
-        gpt2_unicode = ''.join([self.byte_to_unicode[b] for b in utf8_bytes])
+    # def encode_one_token(self, token: str) -> list[int]:
+    #     # Convert input token to UTF-8 bytes, then to GPT2 unicode
+    #     utf8_bytes = token.encode("utf-8")
+    #     gpt2_unicode = ''.join([self.byte_to_unicode[b] for b in utf8_bytes])
         
-        # First, split into individual characters (base tokens)
-        base_tokens = list(gpt2_unicode)
+    #     # # First, split into individual characters (base tokens)
+    #     # base_tokens = list(gpt2_unicode)
         
-        # Convert base tokens to their token IDs
-        token_ids = []
-        for char in base_tokens:
-            char_byte = self.unicode_to_byte[char]
+    #     # Convert base tokens to their token IDs
+    #     token_ids = []
+    #     for char in gpt2_unicode:
+    #         char_byte = bytes(self.unicode_to_byte[char])
         
-            if char_bytes in self.reverse_vocab:
-                token_ids.append(self.reverse_vocab[char_bytes])
-            else:
-                raise ValueError(f"Cannot tokenize character: {repr(char)}")
+    #         if char_byte in self.reverse_vocab:
+    #             token_ids.append(self.reverse_vocab[char_byte])
+    #         else:
+    #             raise ValueError(f"Cannot tokenize character: {repr(char)}")
         
-        # Apply BPE merges in order (like tiktoken does)
-        # Keep merging until no more merges are possible
-        while len(token_ids) >= 2:
-            # Find all adjacent pairs that can be merged
-            mergeable_pairs = []
-            for i in range(len(token_ids) - 1):
-                pair = (token_ids[i], token_ids[i + 1])
+    #     # Apply BPE merges in order (like tiktoken does)
+    #     # Keep merging until no more merges are possible
+    #     while len(token_ids) >= 2:
+    #         # Find all adjacent pairs that can be merged
+    #         mergeable_pairs = []
+    #         for i in range(len(token_ids) - 1):
+    #             pair = (token_ids[i], token_ids[i + 1])
                 
-                # Get the byte sequences for these tokens
-                byte1 = self.vocab[pair[0]]
-                byte2 = self.vocab[pair[1]]
+    #             # Get the byte sequences for these tokens
+    #             byte1 = self.vocab[pair[0]]
+    #             byte2 = self.vocab[pair[1]]
                 
-                # Check if this pair has a merge in the merge order
-                gpt2_1 = ''.join([self.byte_to_unicode[b] for b in byte1])
-                gpt2_2 = ''.join([self.byte_to_unicode[b] for b in byte2])
+    #             # Check if this pair has a merge in the merge order
+    #             gpt2_1 = ''.join([self.byte_to_unicode[b] for b in byte1])
+    #             gpt2_2 = ''.join([self.byte_to_unicode[b] for b in byte2])
                 
-                if (gpt2_1, gpt2_2) in self._merge_order:
-                    mergeable_pairs.append((i, pair, self._merge_order[(gpt2_1, gpt2_2)]))
+    #             if (gpt2_1, gpt2_2) in self._merge_order:
+    #                 mergeable_pairs.append((i, pair, self._merge_order[(byte1, byte2)]))
             
-            if not mergeable_pairs:
-                # No more merges possible
-                break
+    #         if not mergeable_pairs:
+    #             # No more merges possible
+    #             break
             
-            # Find the pair with the lowest merge order (earliest merge)
-            mergeable_pairs.sort(key=lambda x: x[2])
-            best_idx, best_pair, best_order = mergeable_pairs[0]
+    #         # Find the pair with the lowest merge order (earliest merge)
+    #         mergeable_pairs.sort(key=lambda x: x[2])
+    #         best_idx, best_pair, best_order = mergeable_pairs[0]
             
-            # Create the merged token
-            merged_byte1 = self.vocab[best_pair[0]]
-            merged_byte2 = self.vocab[best_pair[1]]
-            merged_bytes = merged_byte1 + merged_byte2
+    #         # Create the merged token
+    #         merged_byte1 = self.vocab[best_pair[0]]
+    #         merged_byte2 = self.vocab[best_pair[1]]
+    #         merged_bytes = merged_byte1 + merged_byte2
             
-            # Check if the merged bytes exist in vocabulary
-            if merged_bytes not in self.reverse_vocab:
-                # This shouldn't happen if merges are valid
-                break
+    #         # Check if the merged bytes exist in vocabulary
+    #         if merged_bytes not in self.reverse_vocab:
+    #             # This shouldn't happen if merges are valid
+    #             break
             
-            # Replace the pair with the merged token
-            new_token_id = self.reverse_vocab[merged_bytes]
-            token_ids = token_ids[:best_idx] + [new_token_id] + token_ids[best_idx + 2:]
+    #         # Replace the pair with the merged token
+    #         new_token_id = self.reverse_vocab[merged_bytes]
+    #         token_ids = token_ids[:best_idx] + [new_token_id] + token_ids[best_idx + 2:]
         
-        return token_ids
+    #     return token_ids
 
     def pretokenize(self, text: str) -> list[str]:
         """Pre-tokenize text into tokens"""
@@ -210,11 +210,10 @@ class tokenizer:
         - Consecutive whitespace -> separate token (e.g., "\n\n" stays as "\n\n")
         - Trailing whitespace -> separate token
         """
-        import re
         
         # GPT-2 pattern from tiktoken: handles contractions, leading spaces, and whitespace
         # Order matters - more specific patterns first
-        pattern = r"'s|'t|'re|'ve|'m|'ll|'d| ?[a-zA-Z]+| ?[0-9]+| ?[^\s0-9a-zA-Z]+|\s+"
+        pattern = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         
         tokens = []
         for match in re.finditer(pattern, text):
@@ -224,44 +223,53 @@ class tokenizer:
 
     def _apply_bpe_merges(self, token_ids: list[int]) -> list[int]:
         """Apply BPE merges to a list of token IDs within a single pretoken."""
+        
+        
         while len(token_ids) >= 2:
-            # Find all adjacent pairs that can be merged
             mergeable_pairs = []
+            
+            # 扫描所有相邻对，找出可合并的
             for i in range(len(token_ids) - 1):
-                pair = (token_ids[i], token_ids[i + 1])
+                left_id, right_id = token_ids[i], token_ids[i + 1]
+                pair = (left_id, right_id)
                 
-                # Get the byte sequences for these tokens
-                byte1 = self.vocab[pair[0]]
-                byte2 = self.vocab[pair[1]]
-                
-                # Check if this pair has a merge in the merge order
-                gpt2_1 = ''.join([self.byte_to_unicode[b] for b in byte1])
-                gpt2_2 = ''.join([self.byte_to_unicode[b] for b in byte2])
-                
-                if (gpt2_1, gpt2_2) in self._merge_order:
-                    mergeable_pairs.append((i, pair, self._merge_order[(gpt2_1, gpt2_2)]))
+                # 获取两个token的字节序列
+                left_bytes = self.vocab[left_id]
+                right_bytes = self.vocab[right_id]
+                for merge in self.merges:
+                    if merge == (left_bytes, right_bytes):
+                        mergeable_pairs.append((i, pair, self._merge_order[merge]))
             
             if not mergeable_pairs:
-                # No more merges possible
+                # 没有可合并的对，终止算法
                 break
             
-            # Find the pair with the lowest merge order (earliest merge)
-            mergeable_pairs.sort(key=lambda x: x[2])
-            best_idx, best_pair, best_order = mergeable_pairs[0]
+            # 找到优先级最高（merge_rank最小）的合并对
+            mergeable_pairs.sort(key=lambda x: x[2])  # 按merge_rank排序
+            best_idx, (best_left_id, best_right_id), _ = mergeable_pairs[0]
             
-            # Create the merged token
-            merged_byte1 = self.vocab[best_pair[0]]
-            merged_byte2 = self.vocab[best_pair[1]]
-            merged_bytes = merged_byte1 + merged_byte2
+            # 获取两个token的原始字节并合并
+            left_bytes = self.vocab[best_left_id]
+            right_bytes = self.vocab[best_right_id]
+            merged_bytes = left_bytes + right_bytes
             
-            # Check if the merged bytes exist in vocabulary
+            # 查找合并后字节序列对应的新token_id
             if merged_bytes not in self.reverse_vocab:
-                # This shouldn't happen if merges are valid
-                break
+                # 关键修复：抛出异常而非静默中断
+                raise KeyError(
+                    f"BPE合并失败：字节序列 {merged_bytes!r} 不在词汇表中。"
+                    f"合并规则与词汇表可能不匹配。"
+                )
             
-            # Replace the pair with the merged token
             new_token_id = self.reverse_vocab[merged_bytes]
-            token_ids = token_ids[:best_idx] + [new_token_id] + token_ids[best_idx + 2:]
+            
+            # 执行合并：用新token替换原来的两个token
+            token_ids = (
+                token_ids[:best_idx] + 
+                [new_token_id] + 
+                token_ids[best_idx + 2:]
+            )
+            mergeable_pairs.clear()  # 清除当前轮次的合并对，准备下一轮扫描
         
         return token_ids
     
@@ -282,8 +290,7 @@ class tokenizer:
                     # Convert to token IDs
                     token_ids = []
                     for char in gpt2_unicode:
-                        char_byte = self.unicode_to_byte[char]
-                        char_bytes = bytes([char_byte])
+                        char_bytes=char.encode('utf-8')
                         token_ids.append(self.reverse_vocab[char_bytes])
                     
                     # Apply BPE merges WITHIN this pretoken only
@@ -303,35 +310,22 @@ class tokenizer:
                 yield token_id
 
     def decode(self, ids: list[int]) -> str:
-        result_bytes = bytearray()
-        
+        # Step 1: Get all byte sequences from vocab
+        result_bytes = []
         for id in ids:
-            if id in self.vocab:
-                byte_seq = self.vocab[id]
-                if isinstance(byte_seq, bytes):
-                    result_bytes.extend(byte_seq)
-                else:
-                    result_bytes.extend(str(byte_seq).encode('utf-8'))
-            else:
-                raise ValueError(f"ID {id} not in vocabulary")
+            byte_seq = self.vocab[id]
+            result_bytes.append(byte_seq)
         
-        # Decode the concatenated bytes as UTF-8, replacing invalid sequences
-        return result_bytes.decode('utf-8', errors='replace')
+        # Step 2: Concatenate all bytes
+        concatenated = b''.join(result_bytes)
+        
+        # Step 3: Convert GPT2 unicode characters back to regular bytes
+        # Each GPT2 unicode char corresponds to a byte in the original UTF-8 encoding
+        regular_bytes = bytes(self.unicode_to_byte[char] for char in concatenated.decode('utf-8'))
+        
+        # Step 4: Decode as UTF-8
+        return regular_bytes.decode('utf-8', errors='replace')
 
-    def decode_with_spaces(self, ids: list[int]) -> str:
-        tokens = []
-        for id in ids:
-            if id in self.vocab:
-                byte_seq = self.vocab[id]
-                if isinstance(byte_seq, bytes):
-                    token = byte_seq.decode("utf-8", errors="replace")
-                else:
-                    token = str(byte_seq)
-                tokens.append(token)
-            else:
-                raise ValueError(f"ID {id} not in vocabulary")
-        
-        return " ".join(tokens)
 
 
 if __name__ == "__main__":
@@ -351,26 +345,21 @@ if __name__ == "__main__":
             for line in f:
                 line = line.strip()
                 if line and len(line.split(" ")) == 2:
-                    merges.append(tuple(line.split(" ")))
-        
+                    str1,str2=line.split(" ")
+                    byte1=str1.encode('utf-8')
+                    byte2=str2.encode('utf-8')
+                    merges.append((byte1, byte2))
+        print(type(merges[1][0]))
         print("Vocabulary loaded successfully")
         print(f"Vocabulary size: {len(vocab)}")
         print(f"Merges size: {len(merges)}")
         
-        # Convert merges to bytes
-        byte_to_unicode = gpt2_bytes_to_unicode()
-        unicode_to_byte = {v: k for k, v in byte_to_unicode.items()}
-        
-        byte_merges = []
-        for merge in merges:
-            token1_bytes = bytes([unicode_to_byte[c] for c in merge[0]])
-            token2_bytes = bytes([unicode_to_byte[c] for c in merge[1]])
-            byte_merges.append((token1_bytes, token2_bytes))
-        
-        tokenizer_instance = tokenizer(vocab, byte_merges, [])
+
+        tokenizer_instance = tokenizer(vocab, merges, [])
         print("Tokenizer initialized successfully")
         
-        test_token = "Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
+        test_token = "🙃"
+        #"Héllò hôw <|endoftext|><|endoftext|> are ü? 🙃<|endoftext|>"
         print('preo token:', tokenizer_instance.pretokenize(test_token))
         encoded = tokenizer_instance.encode(test_token)
         print(f"Encoded '{test_token}': {encoded}")
@@ -382,3 +371,12 @@ if __name__ == "__main__":
         print(f"An error occurred: {e}")
         import traceback
         traceback.print_exc()
+# "🙃" 的编码过程分析：
+# "🙃" 的 UTF-8 编码是 F0 9F 99 83
+#按照字节进行预分词，实际上unicode码在0~255之间对应的每个字符不都是可见的，
+#为了可见，进行了转化，对0~255之间的每个不可见字符进行了映射，映射到可见的字符，即将不可见字符的unicode编码加上256后得到一个新的unicode字符，这样就保证了每个字节都对应一个可见的unicode字符。
+# 因此，"🙃"的utf编码会被转换为对应的 GPT-2 unicode 字符：ðŁĻĥ
+#
+#
+#
+#
