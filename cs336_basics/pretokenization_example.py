@@ -63,40 +63,50 @@ def find_chunk_boundaries(
 
 
 
-def process_chunk(start_end: tuple, filename: str, token: bytes):
+def process_chunk(start_end: tuple, filename: str,special_tokens: list[str] | None = None):
     """处理单个块的函数（可在不同进程中运行）"""
     with open(filename, "rb") as f:
         start, end = start_end
         f.seek(start)
         chunk_data = f.read(end - start)
         text = chunk_data.decode("utf-8", errors="ignore")
+        # Convert special tokens to bytes for filtering
+        special_token_bytes = set()
+        if special_tokens:
+            for one_token in special_tokens:
+                special_token_bytes.add(one_token.encode('utf-8'))
         # 进行实际的处理，如tokenization
-        text=text.replace("<|endoftext|>","")
-        tokens =re.finditer(r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""", text, re.MULTILINE)
-        dicts={}
-        for match in tokens:
-            match_str=match.group()
-            if match.group() not in dicts:
+        # GPT-2 pattern
+        pattern = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+        token_counts = {}
+        for match in re.finditer(pattern, text,flags=re.UNICODE):
+            token_str = match.group()
 
-                dicts[tuple(char.encode('utf-8') for char in match_str)]=0
-            dicts[tuple(char.encode('utf-8') for char in match_str)]+=1
-        return dicts
+            token_bytes = token_str.encode('utf-8')
+            
+            # Skip special tokens - they should not be part of BPE training
+            if token_bytes in special_token_bytes:
+                continue
+            
+            token_counts[token_bytes] = token_counts.get(token_bytes, 0) + 1
+        return token_counts
 
 
-def parallel_file_processing(filename: str, num_processes: int = 4):
+def parallel_file_processing(filename: str,num_processes: int = 4,special_tokens: list[str] | None = None)-> dict[bytes, int]:
     """并行处理文件的完整示例"""
     with open(filename, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
     # 创建(start, end)对列表
     chunks = list(zip(boundaries[:-1], boundaries[1:]))
+    print('chunks:',chunks)
 
     # 使用进程池并行处理
     with mp.Pool(num_processes) as pool:
         # 每个进程处理一个块
         results = pool.starmap(
             process_chunk,
-            [(chunk, filename, b"<|endoftext|>") for chunk in chunks]
+            [(chunk, filename, special_tokens) for chunk in chunks]
         )
 
     # 汇总结果
@@ -107,8 +117,9 @@ def parallel_file_processing(filename: str, num_processes: int = 4):
 ## Usage
 if __name__ == "__main__":
     start_time=time.perf_counter()
-    total_tokens = parallel_file_processing("/home/tao/assignment1-basics/tests/fixtures/tinystories_sample.txt",8)
+    total_tokens = parallel_file_processing("/home/tao/assignment1-basics/tests/fixtures/tinystories_sample.txt",8,["<|endoftext|>"])
     end_time = time.perf_counter()
     print(f"将大文件分块并且按照空格进行预分词耗时: {end_time-start_time:.9f} 秒")  # 纳秒精度
     print(f"token总数: {len(total_tokens)}")
+    print(f"前10个token及其计数: {list(total_tokens.items())[:10]}")
 

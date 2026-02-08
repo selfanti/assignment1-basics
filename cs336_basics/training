@@ -5,7 +5,7 @@ import pickle
 import gzip
 import regex as re
 from typing import Any
-from cs336_basics.pretokenization_example import parallel_file_processing
+
 
 def save_with_pickle(data: Any, filename: str, compress: bool = False):
     """使用pickle保存数据"""
@@ -78,8 +78,8 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
         merges: list of (left_bytes, right_bytes) tuples in order of creation
     """
     # Get pretokenized corpus as dict of token_bytes -> count (excluding special tokens)
-    token_counts=parallel_file_processing(input_path,8,special_tokens)
-    print(token_counts)
+    token_counts = pretokenize_file(input_path, special_tokens)
+    
     num_special = len(special_tokens)
     base_vocab_size = 256 + num_special
     num_merges = vocab_size - base_vocab_size
@@ -98,31 +98,27 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
     # Track merges
     merges = []
     
-    # Compute substrings of special tokens that should not be learned
-    # We must not create any vocab entry that is a proper substring of a special token,
-    # because during tokenization, the tokenizer might match this substring instead of
-    # continuing to match the full special token.
-    # However, we only filter when the special token pattern actually appears in the corpus.
-    # For example, if "<|endoftext|>" is a special token and "<|" appears in the corpus,
-    # we should prevent learning "|>" to avoid tokenizing "<|..." as "<" + "|>" instead of "<|..."
-    forbidden_substrings = set()
+    # Compute all proper prefixes of special tokens
+    # A proper prefix is any prefix that is shorter than the full token
+    special_prefixes = set()
     for special_token in special_tokens:
         token_bytes = special_token.encode('utf-8')
-        # Check if this special token's prefix appears in the corpus
-        # If not, we don't need to filter anything for this token
-        for prefix_len in range(1, len(token_bytes)):
-            prefix = token_bytes[:prefix_len]
-            if prefix in token_counts:
-                # The prefix appears, so we should filter proper suffixes
-                # to prevent them from combining to form the full special token
-                for i in range(len(token_bytes)):
-                    for j in range(i + 1, len(token_bytes) + 1):
-                        if i != 0 or j != len(token_bytes):  # Not the full token
-                            substr = token_bytes[i:j]
-                            # Only filter multi-char substrings that appear in corpus
-                            if len(substr) > 1 and substr in token_counts:
-                                forbidden_substrings.add(substr)
-                break  # Found the prefix, no need to check longer ones
+        for i in range(1, len(token_bytes)):
+            special_prefixes.add(token_bytes[:i])
+    
+    # Track which vocab entries are special prefixes
+    # Initially, all single-byte tokens that are prefixes of special tokens are tracked
+    forbidden_merge_left = set()
+    forbidden_merge_right = set()
+    
+    # Find which single-byte tokens are special prefixes
+    for token_id in range(base_vocab_size):
+        token_bytes = vocab[token_id]
+        if token_bytes in special_prefixes:
+            if len(token_bytes) == 1:
+                # Track single-byte tokens that are prefixes
+                forbidden_merge_left.add(token_bytes)
+                forbidden_merge_right.add(token_bytes)
     
     # Track words as tuples of individual bytes with their counts
     # word_tokens: maps word tuple (of bytes) -> count
@@ -147,19 +143,20 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
         if not pair_counts:
             break
         
-        # Filter out pairs that would create a forbidden substring
-        valid_pairs = {}
-        for pair, count in pair_counts.items():
-            merged = pair[0] + pair[1]
-            if merged not in forbidden_substrings:
-                valid_pairs[pair] = count
+        # Filter out forbidden pairs
+        # A pair is forbidden if:
+        # 1. left is in forbidden_merge_left (would create a longer forbidden prefix)
+        # 2. right is in forbidden_merge_right (can't be appended to a forbidden prefix)
+        valid_pairs = {
+            pair: count for pair, count in pair_counts.items()
+            if pair[0] not in forbidden_merge_left and pair[1] not in forbidden_merge_right
+        }
         
         if not valid_pairs:
             break
         
-        # Find the most frequent pair, using tuple order as tie-breaker
-        # This ensures deterministic results matching the reference
-        best_pair = max(valid_pairs.items(), key=lambda x: (x[1], x[0][0], x[0][1]))[0]
+        # Find the most frequent valid pair
+        best_pair = max(valid_pairs.items(), key=lambda x: x[1])[0]
         left_bytes, right_bytes = best_pair
         
         # Add to vocab
@@ -169,6 +166,12 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
         
         # Record the merge
         merges.append(best_pair)
+        
+        # Update forbidden tracking
+        # The new token might be a special prefix
+        if new_token_bytes in special_prefixes:
+            forbidden_merge_left.add(new_token_bytes)
+            forbidden_merge_right.add(new_token_bytes)
         
         # Apply merge to all words
         new_word_tokens = {}
@@ -192,6 +195,5 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
 
 if __name__ == "__main__":
     vocab, merges = train_bpe("test.txt", 1000, ["<|endoftext|>"])
-    print(vocab,merges)
     save_with_pickle(vocab, "test_vocab.pkl")
     save_with_pickle(merges, "test_merges.pkl")
