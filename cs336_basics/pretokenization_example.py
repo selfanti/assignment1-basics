@@ -4,6 +4,8 @@ import multiprocessing as mp
 from typing import List
 import time
 import regex as re
+
+
 def add_dicts(dicts: list[dict]) -> dict:
     result={}
     for dict in dicts:
@@ -62,10 +64,8 @@ def find_chunk_boundaries(
 
 
 
-
 def process_chunk(start_end: tuple, filename: str,special_tokens: list[str] | None = None):
     """处理单个块的函数（可在不同进程中运行）"""
-    print(start_end, filename,special_tokens)
     with open(filename, "rb") as f:
         start, end = start_end
         f.seek(start)
@@ -100,7 +100,7 @@ def parallel_file_processing(filename: str,special_tokens: list[str] | None = No
 
     # 创建(start, end)对列表
     chunks = list(zip(boundaries[:-1], boundaries[1:]))
-    print('chunks:',chunks)
+    print('\nchunks:',chunks)
 
     # 使用进程池并行处理
     with mp.Pool(num_processes) as pool:
