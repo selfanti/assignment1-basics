@@ -65,34 +65,35 @@ def find_chunk_boundaries(
 
 def process_chunk(start_end: tuple, filename: str,special_tokens: list[str] | None = None):
     """处理单个块的函数（可在不同进程中运行）"""
+    print(start_end, filename,special_tokens)
     with open(filename, "rb") as f:
         start, end = start_end
         f.seek(start)
         chunk_data = f.read(end - start)
         text = chunk_data.decode("utf-8", errors="ignore")
-        # Convert special tokens to bytes for filtering
-        special_token_bytes = set()
-        if special_tokens:
-            for one_token in special_tokens:
-                special_token_bytes.add(one_token.encode('utf-8'))
-        # 进行实际的处理，如tokenization
-        # GPT-2 pattern
-        pattern = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        token_counts = {}
-        for match in re.finditer(pattern, text,flags=re.UNICODE):
-            token_str = match.group()
+    # Convert special tokens to bytes for filtering
+    special_token_bytes = set()
+    if special_tokens:
+        for one_token in special_tokens:
+            special_token_bytes.add(one_token.encode('utf-8'))
+    # 进行实际的处理，如tokenization
+    # GPT-2 pattern
+    pattern = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    token_counts = {}
+    for match in re.finditer(pattern, text):
+        token_str = match.group()
 
-            token_bytes = token_str.encode('utf-8')
-            
-            # Skip special tokens - they should not be part of BPE training
-            if token_bytes in special_token_bytes:
-                continue
-            
-            token_counts[token_bytes] = token_counts.get(token_bytes, 0) + 1
-        return token_counts
+        token_bytes = token_str.encode('utf-8')
+        
+        # Skip special tokens - they should not be part of BPE training
+        if token_bytes in special_token_bytes:
+            continue
+        
+        token_counts[token_bytes] = token_counts.get(token_bytes, 0) + 1
+    return token_counts
 
 
-def parallel_file_processing(filename: str,num_processes: int = 4,special_tokens: list[str] | None = None)-> dict[bytes, int]:
+def parallel_file_processing(filename: str,special_tokens: list[str] | None = None,num_processes: int = 4)-> dict[bytes, int]:
     """并行处理文件的完整示例"""
     with open(filename, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
