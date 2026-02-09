@@ -118,9 +118,27 @@ def parallel_file_processing(filename: str,special_tokens: list[str] | None = No
 ## Usage
 if __name__ == "__main__":
     start_time=time.perf_counter()
-    total_tokens = parallel_file_processing("/home/tao/assignment1-basics/tests/fixtures/tinystories_sample.txt",8,["<|endoftext|>"])
+    total_tokens_multi = parallel_file_processing("/home/tao/assignment1-basics/tests/fixtures/tinystories_sample_5M.txt",["<|endoftext|>"],8)
     end_time = time.perf_counter()
     print(f"将大文件分块并且按照空格进行预分词耗时: {end_time-start_time:.9f} 秒")  # 纳秒精度
-    print(f"token总数: {len(total_tokens)}")
-    print(f"前10个token及其计数: {list(total_tokens.items())[:10]}")
+    print(f"token总数: {len(total_tokens_multi)}")
+    print(f"前10个token及其计数: {list(total_tokens_multi.items())[:10]}")
+    start_time=time.perf_counter()
+    total_tokens_single = parallel_file_processing("/home/tao/assignment1-basics/tests/fixtures/tinystories_sample_5M.txt",["<|endoftext|>"],1)
+    end_time = time.perf_counter()
+    print(f"将大文件分块并且按照空格进行预分词耗时: {end_time-start_time:.9f} 秒")  # 纳秒精度
+    print(f"token总数: {len(total_tokens_single)}")
+    print(f"前10个token及其计数: {list(total_tokens_single.items())[:10]}")
+    #assert total_tokens_multi == total_tokens_single
+    for key,value in total_tokens_multi.items():
+        if key not in total_tokens_single:
+            print(f"Token {key} found in multi but not in single")
+        if total_tokens_single[key] != value:
+            print(f"Token {key} has count {value} in multi but {total_tokens_single[key]} in single")
+    for key,value in total_tokens_single.items():
+        if key not in total_tokens_multi:
+            print(f"Token {key} found in single but not in multi")
+        if total_tokens_multi[key] != value:
+            print(f"Token {key} has count {value} in single but {total_tokens_multi[key]} in multi")
+
 
