@@ -79,11 +79,7 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
     """
     # Get pretokenized corpus as dict of token_bytes -> count (excluding special tokens)
     #token_counts=pretokenize_file(input_path,special_tokens)
-<<<<<<< HEAD
-    token_counts=parallel_file_processing(input_path,special_tokens,4)
-=======
     token_counts=parallel_file_processing(input_path,special_tokens,8)
->>>>>>> temp-branch
     num_special = len(special_tokens)
     base_vocab_size = 256 + num_special
     num_merges = vocab_size - base_vocab_size

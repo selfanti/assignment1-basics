@@ -3,6 +3,7 @@ from typing import BinaryIO
 import multiprocessing as mp
 import time
 import regex as re
+import os
 
 
 def add_dicts(dicts: list[dict]) -> dict:
@@ -125,7 +126,7 @@ def parallel_file_processing(filename: str,special_tokens: list[str] | None = No
     with mp.Pool(num_processes) as pool:
         # 每个进程处理一个块
         results = pool.starmap(
-            process_chunk_fixed,
+            process_chunk,
             [(chunk, filename, special_tokens) for chunk in chunks]
         )
     
