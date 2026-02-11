@@ -81,9 +81,14 @@ class PositionWise_FeedForward(torch.nn.Module):
         mean=0
         torch.nn.init.trunc_normal_(self.w1,mean=mean,std=std,a=-3*std,b=3*std)
         torch.nn.init.trunc_normal_(self.w2,mean=mean,std=std,a=-3*std,b=3*std)
-        torch.nn.init.trunc_normal_(self.w2,mean=mean,std=std,a=-3*std,b=3*std)
+        torch.nn.init.trunc_normal_(self.w3,mean=mean,std=std,a=-3*std,b=3*std)
     def forward(self,x):
-        return self.w2@(torch.sigmoid(self.w1@x)@self.w3)
+        # FFN(x) = SwiGLU(x, W1, W2, W3) = W2(SiLU(W1x) ⊙ W3x)
+        # x: (..., d_model) -> w1@x: (..., d_ff), w3@x: (..., d_ff)
+        w1_out = einsum(self.w1, x, "d_ff d_model, ... d_model -> ... d_ff")
+        w3_out = einsum(self.w3, x, "d_ff d_model, ... d_model -> ... d_ff")
+        swiglu = w1_out*torch.sigmoid(w1_out) * w3_out
+        return einsum(self.w2, swiglu, "d_model d_ff, ... d_ff -> ... d_model")
 
 if __name__=='__main__':
     linear_layer=Linear(3,3)
