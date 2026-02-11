@@ -5,7 +5,7 @@ import pickle
 import gzip
 import regex as re
 from typing import Any
-from cs336_basics.pretokenization_example import parallel_file_processing
+from cs336_basics.pretokenization import parallel_file_processing
 
 def save_with_pickle(data: Any, filename: str, compress: bool = False):
     """使用pickle保存数据"""
