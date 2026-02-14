@@ -15,6 +15,7 @@ from .adapters import (
     run_transformer_lm,
     run_linear,
     run_embedding,
+    run_softmax,
 )
 
 
@@ -200,3 +201,6 @@ def test_silu_matches_pytorch():
     expected_output = F.silu(x)
     actual_output = run_silu(x)
     numpy.testing.assert_allclose(actual_output.detach().numpy(), expected_output.detach().numpy(), atol=1e-6)
+
+
+

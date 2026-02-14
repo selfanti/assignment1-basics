@@ -22,7 +22,7 @@ class Linear(torch.nn.Module):
     def init_parameters(self):
         '''
         初始化参数
-        均值为0,方差为2/(d_in+d_out)
+        均值为0,方差为$2/(d_{in}+d_{out})$
         '''
         std=(2/(self.in_features+self.out_features))**0.5
         mean=0
@@ -63,7 +63,10 @@ class RMSNorm(torch.nn.Module):
 class PositionWise_FeedForward(torch.nn.Module):
     def __init__(self,d_model:int,d_ff:int,device:torch.device|None=None,dtype:torch.dtype|None=None):
         '''
-        FFN(x) = SwiGLU(x, W1, W2, W3) = W2(SiLU(W1x) ⊙ W3x)
+        $FFN(x) = SwiGLU(x, W_1, W_2, W_3) = W_2(SiLU(W_1x) ⊙ W_3x)$
+        You should set dff to approximately 8/3 times dmodel in your implementation, 
+        while ensuring that  the dimensionality of the inner feed-forward layer
+        is a multiple of 64 to make good use of your hardware.
         '''
         super().__init__()
         self.d_model=d_model
@@ -75,7 +78,7 @@ class PositionWise_FeedForward(torch.nn.Module):
     def init_parameters(self):
         '''
         初始化参数
-        均值为0,方差为2/(d_in+d_out)
+        均值为0,方差为$2/(d_{in}+d_{out})$
         '''
         std=(2/(self.d_ff+self.d_model))**0.5
         mean=0
@@ -90,6 +93,177 @@ class PositionWise_FeedForward(torch.nn.Module):
         swiglu = w1_out*torch.sigmoid(w1_out) * w3_out
         return einsum(self.w2, swiglu, "d_model d_ff, ... d_ff -> ... d_model")
 
+class RotaryPositionalEmbedding(torch.nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        '''
+        $q'^{(i)} = R^iq^{(i)} = R^iW_qx^{(i)}$ 
+        and the same computation for k
+        '''
+        super().__init__()
+        self.d_k = d_k
+        self.theta = theta
+        
+        # Create rotation matrices for all positions up to max_seq_len
+        # Shape: (max_seq_len, d_k // 2)
+        # Freqs: theta * base^(-2i/d_k) = theta^(-2i/d_k) for base=theta
+        # For i in range(d_k // 2), freq = theta^(-2*i/d_k)
+        freqs = torch.pow(theta, -2 * torch.arange(0, d_k // 2, device=device) / d_k)
+        
+        # Position indices: (max_seq_len,)
+        positions = torch.arange(max_seq_len, device=device)
+        
+        # Outer product gives (max_seq_len, d_k // 2)
+        # freq * position = theta * position / theta^(2i) = position / theta^(2i/d_k)
+        freqs_expo = einsum(freqs, positions, "d2, seq -> seq d2")
+        
+        # cos and sin values: (max_seq_len, d_k // 2)
+        self.register_buffer("cos_vals", torch.cos(freqs_expo), persistent=False)
+        self.register_buffer("sin_vals", torch.sin(freqs_expo), persistent=False)
+        
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        # x: (..., seq_len, d_k)
+        # token_positions: (..., seq_len) or (seq_len,)
+        
+        # Get sequence length from x
+        seq_len = x.shape[-2]
+        
+        # Expand token_positions to match x's leading dimensions if needed
+        # Handle both (seq_len,) and (..., seq_len) cases
+        if token_positions.dim() == 1:
+            # (seq_len,) - expand to match x's leading dims
+            expanded_shape = [1] * (x.dim() - 2) + list(token_positions.shape)
+            pos_expanded = token_positions.view(expanded_shape)
+        else:
+            # Already has batch dims
+            pos_expanded = token_positions
+        
+        # Get cos and sin for the specified positions
+        # cos_vals, sin_vals: (max_seq_len, d_k // 2)
+        # pos_expanded: (..., seq_len) -> after indexing: (..., seq_len, d_k // 2)
+        cos_subset = self.cos_vals[pos_expanded]
+        sin_subset = self.sin_vals[pos_expanded]
+        
+        # x_even: (..., seq_len, d_k // 2) - even indices 0, 2, 4, ...
+        # x_odd: (..., seq_len, d_k // 2) - odd indices 1, 3, 5, ...
+        x_even = x[..., ::2]
+        x_odd = x[..., 1::2]
+        
+        # Apply rotation:
+        # x_rotated_even = x_even * cos - x_odd * sin
+        # x_rotated_odd = x_even * sin + x_odd * cos
+        
+        x_rotated_even = x_even * cos_subset - x_odd * sin_subset
+        x_rotated_odd = x_even * sin_subset + x_odd * cos_subset
+        
+        # Interleave even and odd back together
+        # x_rotated: (..., seq_len, d_k)
+        x_rotated = torch.empty_like(x)
+        x_rotated[..., ::2] = x_rotated_even
+        x_rotated[..., 1::2] = x_rotated_odd
+        
+        return x_rotated
+def softmax(x: torch.Tensor, dim: int) -> torch.Tensor:
+    """
+    Apply softmax to a tensor along a specified dimension with numerical stability.
+    
+    Args:
+        x: Input tensor of arbitrary shape
+        dim: Dimension along which to apply softmax
+    
+    Returns:
+        Tensor with same shape as input, with softmax applied along dim
+    """
+    # Subtract max for numerical stability
+    # keepdim=True maintains the dimension for correct broadcasting
+    max_vals = torch.max(x, dim=dim, keepdim=True)[0]
+    # Compute exp(x - max(x))
+    exp_x = torch.exp(x - max_vals)
+    # Normalize by sum along the dimension
+    sum_exp = torch.sum(exp_x, dim=dim, keepdim=True)
+    return exp_x / sum_exp
+def scaled_dot_product_attention(Q, K, V, mask=None):
+    """
+    Compute scaled dot-product attention.
+    
+    Args:
+        Q (Float[Tensor, " ... queries d_k"]): Query tensor
+        K (Float[Tensor, " ... keys d_k"]): Key tensor
+        V (Float[Tensor, " ... values d_v"]): Values tensor
+        mask (Bool[Tensor, " ... queries keys"] | None): Mask tensor
+    Returns:
+        Tensor of shape (batch_size, num_heads, seq_len_q, d_v) containing the attention output
+    """
+    d_k = Q.shape[-1]
+    
+    # Compute scaled dot product: Q @ K.T
+    scores = einsum( Q, K,"... q d, ... k d -> ... q k") / (d_k ** 0.5)
+    # Apply mask if provided
+    if mask is not None:
+        scores = scores.masked_fill(mask == 0, float('-inf'))
+    
+    # Apply softmax to get attention weights
+    attn_weights = softmax(scores, dim=-1)
+    
+    # Compute attention output: attn_weights @ V
+    output = einsum(attn_weights, V,"... q k, ... k d -> ... q d")
+    return output
+def multihead_self_attention(x,W_Q,W_K, W_V,W_O,d_model,num_heads):
+    """
+    Compute multi-head self-attention.
+    
+    Args:
+        x (Float[Tensor, " ... sequence_length d_model"]): Input tensor
+        W_Q (Float[Tensor, "d_model d_model"]): Query projection weights
+        W_K (Float[Tensor, "d_model d_model"]): Key projection weights
+        W_V (Float[Tensor, "d_model d_model"]): Value projection weights
+        W_O (Float[Tensor, "d_model d_model"]): Output projection weights
+        d_model (int): Model dimension
+        num_heads (int): Number of attention heads
+        """
+    assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+    Q=einsum(x, W_Q,'... d_model, d_model j -> ... j')   # 或 x @ W_Q.T
+    K=einsum(x,W_K,'... d_model, d_model j -> ... j')
+    V=einsum(x,W_V,'... d_model, d_model j -> ... j')
+    d_k=d_model//num_heads
+    # Reshape Q, K, V for multi-head attention
+    Q = rearrange(Q, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
+    K = rearrange(K, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
+    V = rearrange(V, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
+    # Compute attention for each head
+    attn_output = scaled_dot_product_attention(Q, K, V)
+    # Concatenate heads and project back to d_model
+    attn_output = rearrange(attn_output, "... head seq d_k -> ... seq (head d_k)", head=num_heads, d_k=d_k)
+    return einsum(W_O, attn_output, 'd_model j, ... seq d_model -> ... seq d_model')
+def multihead_self_attention_with_rope(x,W_Q,W_K, W_V,W_O,d_model,num_heads,max_seq_len,theta,token_positions):
+    """
+    Compute multi-head self-attention.
+    
+    Args:
+        x (Float[Tensor, " ... sequence_length d_model"]): Input tensor
+        W_Q (Float[Tensor, "d_model d_model"]): Query projection weights
+        W_K (Float[Tensor, "d_model d_model"]): Key projection weights
+        W_V (Float[Tensor, "d_model d_model"]): Value projection weights
+        W_O (Float[Tensor, "d_model d_model"]): Output projection weights
+        d_model (int): Model dimension
+        num_heads (int): Number of attention heads
+        """
+    assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+    Q=einsum(x, W_Q,'... d_model, d_model j -> ... j')   # 或 x @ W_Q.T
+    K=einsum(x,W_K,'... d_model, d_model j -> ... j')
+    V=einsum(x,W_V,'... d_model, d_model j -> ... j')
+    d_k=d_model//num_heads
+    # Reshape Q, K, V for multi-head attention
+    Q = rearrange(Q, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
+    K = rearrange(K, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
+    V = rearrange(V, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
+    rope=RotaryPositionalEmbedding(theta=theta, d_k=d_k, max_seq_len=max_seq_len, device=x.device)
+    Q=rope(Q,token_positions)
+    K=rope(K,token_positions)
+    # Compute attention for each head
+    attn_output = scaled_dot_product_attention(Q, K, V)
+    # Concatenate heads and project back to d_model
+    attn_output = rearrange(attn_output, "... head seq d_k -> ... seq (head d_k)", head=num_heads, d_k=d_k)
+    return einsum(W_O, attn_output, 'd_model j, ... seq d_model -> ... seq d_model')
 if __name__=='__main__':
     linear_layer=Linear(3,3)
     input=torch.randn(3,1)

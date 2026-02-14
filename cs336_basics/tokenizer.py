@@ -223,3 +223,4 @@ class tokenizer:
         
         # Step 2: Decode as UTF-8
         return result_bytes.decode('utf-8', errors='replace')
+        
