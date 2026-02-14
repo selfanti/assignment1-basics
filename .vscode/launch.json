@@ -18,7 +18,7 @@
             "module": "pytest",
             "args": [
                 "-v",
-                "tests/test_tokenizer.py"
+                "tests/test_model.py::test_multihead_self_attention"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",

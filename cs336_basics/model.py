@@ -1,5 +1,8 @@
 import torch.nn
 from einops import rearrange, einsum
+from jaxtyping import Float
+from torch import Tensor
+import math
 class Linear(torch.nn.Module):
     def __init__(self, in_features:int, out_features:int,device:torch.device|None=None,dtype:torch.dtype|None=None):
         """
@@ -196,10 +199,13 @@ def scaled_dot_product_attention(Q, K, V, mask=None):
     d_k = Q.shape[-1]
     
     # Compute scaled dot product: Q @ K.T
-    scores = einsum( Q, K,"... q d, ... k d -> ... q k") / (d_k ** 0.5)
+    scores = einsum(Q, K, "... q d, ... k d -> ... q k") / (d_k ** 0.5)
     # Apply mask if provided
     if mask is not None:
-        scores = scores.masked_fill(mask == 0, float('-inf'))
+        assert mask.dtype == torch.bool, "Mask must be a boolean tensor"
+        assert mask.shape == scores.shape, f"Mask shape {mask.shape} must match scores shape {scores.shape}"
+
+        scores = scores.masked_fill(~mask, float('-inf'))
     
     # Apply softmax to get attention weights
     attn_weights = softmax(scores, dim=-1)
@@ -207,63 +213,56 @@ def scaled_dot_product_attention(Q, K, V, mask=None):
     # Compute attention output: attn_weights @ V
     output = einsum(attn_weights, V,"... q k, ... k d -> ... q d")
     return output
-def multihead_self_attention(x,W_Q,W_K, W_V,W_O,d_model,num_heads):
-    """
-    Compute multi-head self-attention.
-    
-    Args:
-        x (Float[Tensor, " ... sequence_length d_model"]): Input tensor
-        W_Q (Float[Tensor, "d_model d_model"]): Query projection weights
-        W_K (Float[Tensor, "d_model d_model"]): Key projection weights
-        W_V (Float[Tensor, "d_model d_model"]): Value projection weights
-        W_O (Float[Tensor, "d_model d_model"]): Output projection weights
-        d_model (int): Model dimension
-        num_heads (int): Number of attention heads
-        """
-    assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
-    Q=einsum(x, W_Q,'... d_model, d_model j -> ... j')   # 或 x @ W_Q.T
-    K=einsum(x,W_K,'... d_model, d_model j -> ... j')
-    V=einsum(x,W_V,'... d_model, d_model j -> ... j')
-    d_k=d_model//num_heads
-    # Reshape Q, K, V for multi-head attention
-    Q = rearrange(Q, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
-    K = rearrange(K, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
-    V = rearrange(V, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
-    # Compute attention for each head
-    attn_output = scaled_dot_product_attention(Q, K, V)
-    # Concatenate heads and project back to d_model
-    attn_output = rearrange(attn_output, "... head seq d_k -> ... seq (head d_k)", head=num_heads, d_k=d_k)
-    return einsum(W_O, attn_output, 'd_model j, ... seq d_model -> ... seq d_model')
-def multihead_self_attention_with_rope(x,W_Q,W_K, W_V,W_O,d_model,num_heads,max_seq_len,theta,token_positions):
-    """
-    Compute multi-head self-attention.
-    
-    Args:
-        x (Float[Tensor, " ... sequence_length d_model"]): Input tensor
-        W_Q (Float[Tensor, "d_model d_model"]): Query projection weights
-        W_K (Float[Tensor, "d_model d_model"]): Key projection weights
-        W_V (Float[Tensor, "d_model d_model"]): Value projection weights
-        W_O (Float[Tensor, "d_model d_model"]): Output projection weights
-        d_model (int): Model dimension
-        num_heads (int): Number of attention heads
-        """
-    assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
-    Q=einsum(x, W_Q,'... d_model, d_model j -> ... j')   # 或 x @ W_Q.T
-    K=einsum(x,W_K,'... d_model, d_model j -> ... j')
-    V=einsum(x,W_V,'... d_model, d_model j -> ... j')
-    d_k=d_model//num_heads
-    # Reshape Q, K, V for multi-head attention
-    Q = rearrange(Q, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
-    K = rearrange(K, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
-    V = rearrange(V, "... seq (head d_k) -> ... head seq d_k", head=num_heads, d_k=d_k)
-    rope=RotaryPositionalEmbedding(theta=theta, d_k=d_k, max_seq_len=max_seq_len, device=x.device)
-    Q=rope(Q,token_positions)
-    K=rope(K,token_positions)
-    # Compute attention for each head
-    attn_output = scaled_dot_product_attention(Q, K, V)
-    # Concatenate heads and project back to d_model
-    attn_output = rearrange(attn_output, "... head seq d_k -> ... seq (head d_k)", head=num_heads, d_k=d_k)
-    return einsum(W_O, attn_output, 'd_model j, ... seq d_model -> ... seq d_model')
+class multihead_self_attention(torch.nn.Module):
+    def __init__(self,d_model:int,num_heads:int,if_rope=False,theta=None,max_seq_len=None):
+        super().__init__()
+        
+        self.d_model=d_model
+        self.num_heads=num_heads
+        self.if_rope=if_rope
+        self.theta=theta
+        self.max_seq_len=max_seq_len
+        assert self.d_model % self.num_heads == 0, "d_model must be divisible by num_heads"
+        self.q_proj_weight=torch.nn.Parameter(torch.empty((d_model,d_model)))
+        self.k_proj_weight=torch.nn.Parameter(torch.empty((d_model,d_model)))
+        self.v_proj_weight=torch.nn.Parameter(torch.empty((d_model,d_model)))
+        self.o_proj_weight=torch.nn.Parameter(torch.empty((d_model,d_model)))
+        self.init_parameters()
+    def init_parameters(self):
+        '''
+        初始化参数
+        均值为0,方差为$2/(d_{in}+d_{out})$
+        '''
+        std=(2/(self.d_model+self.d_model))**0.5
+        mean=0
+        torch.nn.init.trunc_normal_(self.q_proj_weight,mean=mean,std=std,a=-3*std,b=3*std)
+        torch.nn.init.trunc_normal_(self.k_proj_weight,mean=mean,std=std,a=-3*std,b=3*std)
+        torch.nn.init.trunc_normal_(self.v_proj_weight,mean=mean,std=std,a=-3*std,b=3*std)
+        torch.nn.init.trunc_normal_(self.o_proj_weight,mean=mean,std=std,a=-3*std,b=3*std)
+        if self.if_rope and self.theta is not None and self.max_seq_len is not None:
+            self.rope = RotaryPositionalEmbedding(self.theta, self.d_model//self.num_heads, self.max_seq_len)
+    def forward(self,x,token_positions=None):
+        
+        Q = x @ self.q_proj_weight.T
+        K = x @ self.k_proj_weight.T
+        V = x @ self.v_proj_weight.T
+        d_k=self.d_model//self.num_heads
+        # Reshape Q, K, V for multi-head attention
+        Q = rearrange(Q, "... seq (head d_k) -> ... head seq d_k", head=self.num_heads, d_k=d_k)
+        K = rearrange(K, "... seq (head d_k) -> ... head seq d_k", head=self.num_heads, d_k=d_k)
+        V = rearrange(V, "... seq (head d_k) -> ... head seq d_k", head=self.num_heads, d_k=d_k)
+        if self.if_rope:
+            assert self.theta is not None and self.max_seq_len is not None, "theta, max_seq_len, and token_positions must be provided for RoPE"
+            Q = self.rope(Q,token_positions)
+            K = self.rope(K,token_positions)
+        # Compute attention for each head
+        attn_output = scaled_dot_product_attention(Q, K, V)
+        print('attn_output.shape:',attn_output.shape)
+        # Concatenate heads and project back to d_model
+        attn_output = rearrange(attn_output, "... head seq d_k -> ... seq (head d_k)", head=self.num_heads, d_k=d_k)
+        out = attn_output @ self.o_proj_weight.T
+        return out
+
 if __name__=='__main__':
     linear_layer=Linear(3,3)
     input=torch.randn(3,1)
