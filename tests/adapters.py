@@ -57,7 +57,7 @@ def run_embedding(
 
     from cs336_basics.model import Embedding
     embedding=Embedding(vocab_size,d_model)
-    embedding.load_state_dict({'weights':weights})
+    embedding.load_state_dict({'weight':weights})
     return embedding(token_ids)
 
 
@@ -93,7 +93,7 @@ def run_swiglu(
     # swiglu.w3.weight.data = w3_weight
     from cs336_basics.model import PositionWise_FeedForward
     ffn=PositionWise_FeedForward(d_model,d_ff)
-    ffn.load_state_dict({'w1':w1_weight,'w2':w2_weight,'w3':w3_weight})
+    ffn.load_state_dict({'w1.weight':w1_weight,'w2.weight':w2_weight,'w3.weight':w3_weight})
     return ffn(in_features)
 
 
@@ -152,8 +152,8 @@ def run_multihead_self_attention(
     """
     from cs336_basics.model import multihead_self_attention
     mha=multihead_self_attention(d_model=d_model,num_heads=num_heads,if_rope=False)
-    mha.load_state_dict({'q_proj_weight':q_proj_weight,'k_proj_weight':k_proj_weight,'v_proj_weight':v_proj_weight,'o_proj_weight':o_proj_weight})
-    return mha.forward(x=in_features,token_positions=None)
+    mha.load_state_dict({'q_proj.weight':q_proj_weight,'k_proj.weight':k_proj_weight,'v_proj.weight':v_proj_weight,'output_proj.weight':o_proj_weight})
+    return mha.forward(in_features,token_positions=None)
 
 
 def run_multihead_self_attention_with_rope(
@@ -194,7 +194,7 @@ def run_multihead_self_attention_with_rope(
     """
     from cs336_basics.model import multihead_self_attention
     mha=multihead_self_attention(d_model=d_model,num_heads=num_heads,if_rope=True,theta=theta,max_seq_len=max_seq_len)
-    mha.load_state_dict({'q_proj_weight':q_proj_weight,'k_proj_weight':k_proj_weight,'v_proj_weight':v_proj_weight,'o_proj_weight':o_proj_weight})
+    mha.load_state_dict({'q_proj.weight':q_proj_weight,'k_proj.weight':k_proj_weight,'v_proj.weight':v_proj_weight,'output_proj.weight':o_proj_weight})
     return mha.forward(x=in_features,token_positions=token_positions)
 
 def run_rope(
@@ -291,7 +291,17 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.model import TransformerBlock
+    block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        theta=theta,
+        max_seq_len=max_seq_len,
+    )
+    # weights 的 key 已去掉 "layers.0." 前缀，与 TransformerBlock 的 state_dict 完全匹配
+    block.load_state_dict(weights)
+    return block(in_features)
 
 
 def run_transformer_lm(
@@ -373,7 +383,18 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.model import TransformerLM
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+    model.load_state_dict(weights)
+    return model(in_indices)
 
 
 def run_rmsnorm(
@@ -398,7 +419,7 @@ def run_rmsnorm(
     """
     from cs336_basics.model import RMSNorm
     rms=RMSNorm(d_model,eps)
-    rms.load_state_dict({'gamma':weights})
+    rms.load_state_dict({'weight':weights})
     return rms(in_features)
 
 
@@ -413,7 +434,9 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    # SiLU(x) = x * sigmoid(x)，直接调用 model.py 中的实现
+    from cs336_basics.model import silu
+    return silu(in_features)
 
 
 def run_get_batch(

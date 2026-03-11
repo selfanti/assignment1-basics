@@ -120,7 +120,6 @@ def parallel_file_processing(filename: str,special_tokens: list[str] | None = No
     
     # 创建块列表
     chunks = list(zip(boundaries[:-1], boundaries[1:]))
-    print('\nchunks:',chunks)
 
     # 使用进程池并行处理
     with mp.Pool(num_processes) as pool:
@@ -132,7 +131,7 @@ def parallel_file_processing(filename: str,special_tokens: list[str] | None = No
     
     # 合并结果
     total_tokens = add_dicts(results)
-    print(f"预分词完成，找到 {len(total_tokens)} 种不同的token")
+    #print(f"预分词完成，找到 {len(total_tokens)} 种不同的token")
     
     return total_tokens
 
