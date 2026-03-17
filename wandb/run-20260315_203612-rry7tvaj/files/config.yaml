@@ -1,0 +1,53 @@
+_wandb:
+    value:
+        cli_version: 0.25.1
+        e:
+            ob6r8ee09ryhdzljuavhlvm3xuod29fj:
+                args:
+                    - /home/tao/assignment1-basics/data/datasets/tokens.npy
+                    - --epochs
+                    - "267000"
+                    - --batch_size
+                    - "48"
+                    - --checkpoint
+                codePath: scripts/train.py
+                codePathLocal: scripts/train.py
+                cpu_count: 16
+                cpu_count_logical: 32
+                cudaVersion: "12.7"
+                disk:
+                    /:
+                        total: "1081101176832"
+                        used: "185638236160"
+                email: 1752838035@qq.com
+                executable: /home/tao/assignment1-basics/.venv/bin/python3
+                git:
+                    commit: 7901cd4fa9cf4921882c78a98ff80257934af69e
+                    remote: https://github.com/selfanti/assignment1-basics.git
+                gpu: NVIDIA GeForce RTX 4070 Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      memoryTotal: "8585740288"
+                      name: NVIDIA GeForce RTX 4070 Laptop GPU
+                      uuid: GPU-68d31252-c1cf-dfd8-57f0-1146bf41c903
+                host: DESKTOP-01UHUM3
+                memory:
+                    total: "7942066176"
+                os: Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.36
+                program: /home/tao/assignment1-basics/scripts/train.py
+                python: CPython 3.12.11
+                root: /home/tao/assignment1-basics
+                startedAt: "2026-03-15T12:36:12.540168Z"
+                writerId: ob6r8ee09ryhdzljuavhlvm3xuod29fj
+        m: []
+        python_version: 3.12.11
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "4": 3.12.11
+            "5": 0.25.1
+            "12": 0.25.1
+            "13": linux-x86_64

@@ -28,7 +28,7 @@ This is a CS336 assignment implementing a GPT-style transformer language model f
 
 - **`cs336_basics/model.py`** — Core model components: `Linear`, `Embedding`, `RMSNorm`, `PositionWise_FeedForward` (SwiGLU), `RotaryPositionalEmbedding`, `multihead_self_attention`, `softmax`, `scaled_dot_product_attention`. Missing: `TransformerBlock` and full `TransformerLM` (still `raise NotImplementedError` in adapters).
 - **`cs336_basics/tokenizer.py`** — BPE tokenizer class with GPT-2-style pre-tokenization (via `regex` library), a Trie for vocabulary lookup, merge-order dict for O(1) BPE application, and `encode`/`decode`/`encode_iterable` methods.
-- **`cs336_basics/training_of_tokenizer.py`** — `train_bpe()`: trains BPE from a corpus; uses `parallel_file_processing` from `pretokenization.py`.
+- **`cs336_basics/train_bpe.py`** — `train_bpe()`: trains BPE from a corpus; uses `parallel_file_processing` from `pretokenization.py`.
 - **`cs336_basics/pretokenization.py`** — Parallel corpus pre-tokenization using `multiprocessing`. Splits files at `<|endoftext|>` boundaries, processes chunks with worker processes.
 - **`tests/adapters.py`** — Bridge between tests and implementations. Each `run_*` function instantiates the relevant class, loads weights via `load_state_dict`, and calls forward. **This is where you connect your implementations to the test suite** — complete the `raise NotImplementedError` stubs here.
 
