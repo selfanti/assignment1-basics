@@ -77,58 +77,96 @@ def decode(
         )
 
     context_length = getattr(model, "context_length", None)
+    kv_cache = None
+    can_use_kv_cache = True
 
-    for _ in range(max_tokens):
+    # 生成阶段不需要保留计算图。这里显式关闭 autograd，
+    # 可以避免 cache 把整条历史前向图串起来，减少显存占用并加快采样。
+    with torch.no_grad():
+        for _ in range(max_tokens):
 
-        # Keep the full generated sequence in `tokens`, but only feed the most
-        # recent context window to the model.
-        if context_length is not None:
-            input_ids = tokens[-context_length:].unsqueeze(0)
-        else:
-            input_ids = tokens.unsqueeze(0)
+            if can_use_kv_cache:
+                if kv_cache is None:
+                    # 第一步没有历史 cache，需要把“当前可见窗口”整段送进模型做一次预填充(prefill)。
+                    # 如果 prompt 已经长于 context_length，这里只保留最后一个窗口，
+                    # 与旧版 decode 的截断行为保持一致。
+                    window_start = 0 if context_length is None else max(
+                        tokens.shape[0] - context_length, 0
+                    )
+                    input_ids = tokens[window_start:].unsqueeze(0)
+                    token_positions = torch.arange(
+                        window_start, tokens.shape[0], device=device
+                    ).unsqueeze(0)
+                else:
+                    # 从第二步开始，只需把“最新生成的一个 token”送进模型。
+                    # 之前所有历史信息都已经压进各层的 K/V cache 里，不再需要整段重算。
+                    input_ids = tokens[-1:].unsqueeze(0)
+                    token_positions = torch.tensor(
+                        [[tokens.shape[0] - 1]], device=device
+                    )
 
-        # forward
-        logits = model(input_ids)           # (1, T, vocab)
+                try:
+                    model_output = model(
+                        input_ids,
+                        token_positions=token_positions,
+                        kv_cache=kv_cache,
+                        use_kv_cache=True,
+                    )
+                    logits, kv_cache = model_output
+                except TypeError:
+                    # 保持 decode 的通用性: 如果外部传入的是不支持 kv cache 的模型，
+                    # 自动退回到旧逻辑，而不是直接报错。
+                    can_use_kv_cache = False
+                    kv_cache = None
 
-        logits = logits[:, -1, :]           # (1, vocab)
-        logits = logits.squeeze(0)          # (vocab)
+            if not can_use_kv_cache:
+                # 回退路径沿用原实现: 每步重新计算最近的上下文窗口。
+                if context_length is not None:
+                    input_ids = tokens[-context_length:].unsqueeze(0)
+                else:
+                    input_ids = tokens.unsqueeze(0)
 
-        # temperature
-        if temperature is not None and temperature > 0:
-            logits = logits / temperature
+                logits = model(input_ids)           # (1, T, vocab)
 
-        probs = softmax(logits, dim=-1)
+            logits = logits[:, -1, :]           # (1, vocab)
+            logits = logits.squeeze(0)          # (vocab)
 
-        # top-p (nucleus sampling)
-        if top_p is not None:
+            # temperature
+            if temperature is not None and temperature > 0:
+                logits = logits / temperature
 
-            sorted_probs, sorted_indices = torch.sort(
-                probs,
-                descending=True
-            )
+            probs = softmax(logits, dim=-1)
 
-            cumulative_probs = torch.cumsum(sorted_probs, dim=0)
+            # top-p (nucleus sampling)
+            if top_p is not None:
 
-            mask = cumulative_probs > top_p
-            mask[1:] = mask[:-1].clone()
-            mask[0] = False
+                sorted_probs, sorted_indices = torch.sort(
+                    probs,
+                    descending=True
+                )
 
-            sorted_probs[mask] = 0
+                cumulative_probs = torch.cumsum(sorted_probs, dim=0)
 
-            sorted_probs = sorted_probs / sorted_probs.sum().clamp(min=1e-8)
+                mask = cumulative_probs > top_p
+                mask[1:] = mask[:-1].clone()
+                mask[0] = False
 
-            next_token = sorted_indices[
-                torch.multinomial(sorted_probs, 1)
-            ]
+                sorted_probs[mask] = 0
 
-        else:
-            next_token = torch.multinomial(probs, 1)
+                sorted_probs = sorted_probs / sorted_probs.sum().clamp(min=1e-8)
 
-        next_token = next_token.squeeze()
-        if next_token.item() == 0:
-            break
+                next_token = sorted_indices[
+                    torch.multinomial(sorted_probs, 1)
+                ]
 
-        # append token
-        tokens = torch.cat([tokens, next_token.unsqueeze(0)])
+            else:
+                next_token = torch.multinomial(probs, 1)
+
+            next_token = next_token.squeeze()
+            if next_token.item() == 0:
+                break
+
+            # append token
+            tokens = torch.cat([tokens, next_token.unsqueeze(0)])
 
     return tokens

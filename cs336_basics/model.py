@@ -1,3 +1,4 @@
+import torch
 import torch.nn
 from einops import rearrange, einsum
 from jaxtyping import Float
@@ -114,26 +115,33 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         super().__init__()
         self.d_k = d_k
         self.theta = theta
+        self.max_seq_len = max_seq_len
 
-        # Create rotation matrices for all positions up to max_seq_len
-        # Shape: (max_seq_len, d_k // 2)
-        # Freqs: theta * base^(-2i/d_k) = theta^(-2i/d_k) for base=theta
-        # For i in range(d_k // 2), freq = theta^(-2*i/d_k)
-        freqs = torch.pow(theta, -2 * torch.arange(0,
-                          d_k // 2, device=device) / d_k)
+        # inv_freq 保存每个二维旋转子空间对应的基础频率。
+        # 后续如果生成长度超过初始化时的 max_seq_len，我们只需要重新按更长的位置表展开，
+        # 不需要重复推导或重建这一组频率参数。
+        self.register_buffer(
+            "inv_freq",
+            torch.pow(theta, -2 * torch.arange(0, d_k // 2, device=device) / d_k),
+            persistent=False,
+        )
+        self._build_rotation_cache(max_seq_len, device)
 
-        # Position indices: (max_seq_len,)
-        positions = torch.arange(max_seq_len, device=device)
+    def _build_rotation_cache(self, cache_len: int, device=None) -> None:
+        # 把 [0, cache_len) 这些位置所需的 cos/sin 一次性展开出来。
+        # 这个表本质上是 RoPE 的只读查找表，推理阶段按位置索引即可，避免每次前向重复算三角函数。
+        positions = torch.arange(cache_len, device=device or self.inv_freq.device)
+        freqs_expo = einsum(self.inv_freq, positions, "d2, seq -> seq d2")
 
-        # Outer product gives (max_seq_len, d_k // 2)
-        # freq * position = theta * position / theta^(2i) = position / theta^(2i/d_k)
-        freqs_expo = einsum(freqs, positions, "d2, seq -> seq d2")
+        cos_vals = torch.cos(freqs_expo)
+        sin_vals = torch.sin(freqs_expo)
 
-        # cos and sin values: (max_seq_len, d_k // 2)
-        self.register_buffer("cos_vals", torch.cos(
-            freqs_expo), persistent=False)
-        self.register_buffer("sin_vals", torch.sin(
-            freqs_expo), persistent=False)
+        if hasattr(self, "cos_vals"):
+            self.cos_vals = cos_vals
+            self.sin_vals = sin_vals
+        else:
+            self.register_buffer("cos_vals", cos_vals, persistent=False)
+            self.register_buffer("sin_vals", sin_vals, persistent=False)
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         # x: (..., seq_len, d_k)
@@ -151,6 +159,13 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         else:
             # Already has batch dims
             pos_expanded = token_positions
+
+        # kv cache 开启后，位置编码会继续沿着“真实生成步数”递增，
+        # 所以 token_positions 可能大于初始化时的 max_seq_len。
+        # 这里按需扩展 cos/sin 查找表，保证长文本生成不会因为 RoPE 表长度固定而越界。
+        max_position = int(pos_expanded.max().item()) + 1
+        if max_position > self.cos_vals.shape[0]:
+            self._build_rotation_cache(max_position, x.device)
 
         # Get cos and sin for the specified positions
         # cos_vals, sin_vals: (max_seq_len, d_k // 2)
@@ -232,6 +247,9 @@ def scaled_dot_product_attention(Q, K, V, mask=None):
     return output
 
 
+KVCache = dict[str, Tensor]
+
+
 class multihead_self_attention(torch.nn.Module):
     def __init__(self, d_model: int, num_heads: int, if_rope=False, theta=None, max_seq_len=None):
         super().__init__()
@@ -252,7 +270,13 @@ class multihead_self_attention(torch.nn.Module):
             self.rope = RotaryPositionalEmbedding(
                 self.theta, self.d_model//self.num_heads, self.max_seq_len)
 
-    def forward(self, x, token_positions=None):
+    def forward(
+        self,
+        x,
+        token_positions=None,
+        kv_cache: KVCache | None = None,
+        use_kv_cache: bool = False,
+    ):
 
         Q = self.q_proj(x)
         K = self.k_proj(x)
@@ -267,15 +291,49 @@ class multihead_self_attention(torch.nn.Module):
                       head=self.num_heads, d_k=d_k)
         if self.if_rope:
             assert self.theta is not None and self.max_seq_len is not None, "theta, max_seq_len, and token_positions must be provided for RoPE"
+            if token_positions is None:
+                # 兼容旧调用方: 如果外部没有显式传入位置，就按当前输入片段内部的相对位置构造。
+                # 训练/整段前向时这与原有行为一致；增量生成时 `TransformerLM.forward`
+                # 会显式传入绝对位置，使缓存里的 K/V 与 token 的真实时间步对齐。
+                token_positions = torch.arange(
+                    x.shape[-2], device=x.device).unsqueeze(0)
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
 
-        # 【修复】之前缺少 causal mask。语言模型使用自回归注意力，
-        # 每个 token 只能关注自身及其之前的 token（不能看到未来的 token）。
-        # 需要构建下三角布尔掩码 (lower-triangular mask)。
-        seq_len = Q.shape[-2]
-        causal_mask = torch.tril(torch.ones(
-            seq_len, seq_len, device=Q.device, dtype=torch.bool))
+        # 如果传入了缓存，说明当前前向不是“从零开始看整段文本”，而是在已有历史后面追加新 token。
+        # 这里把本次新算出的 K/V 追加到历史缓存后面，得到“当前可见的完整上下文”。
+        #
+        # 约定:
+        # 1. cache 中只保存每层 attention 需要复用的 K/V，不缓存 FFN 或残差输出。
+        # 2. cache 的时间维度始终位于倒数第二维，即 (..., head, seq, d_k) 里的 seq 维。
+        # 3. 只在推理路径使用 cache；训练路径仍然按整段前向计算，保证原有接口不变。
+        if kv_cache is not None:
+            K = torch.cat([kv_cache["k"], K], dim=-2)
+            V = torch.cat([kv_cache["v"], V], dim=-2)
+
+        # 当缓存长度超过模型的 context window 时，只保留最近的 max_seq_len 个 token。
+        # 这样做的目标是把 cache 的空间复杂度固定在 O(num_layers * context_length)，
+        # 避免生成长文本时显存/内存线性膨胀。
+        #
+        # 需要注意：窗口发生左移后，这里复用的是“旧窗口下已经算好的隐藏状态”。
+        # 这属于标准的流式 kv cache 语义；如果想与“把新窗口整段重新前向一次”严格等价，
+        # 就必须重新计算所有保留下来的 token，等于失去缓存带来的速度收益。
+        if use_kv_cache and self.max_seq_len is not None and K.shape[-2] > self.max_seq_len:
+            K = K[..., -self.max_seq_len:, :]
+            V = V[..., -self.max_seq_len:, :]
+
+        # 自回归 mask 现在需要同时覆盖两种情况:
+        # 1. 训练/普通前向: query 和 key 来自同一段序列，此时它退化为标准下三角矩阵。
+        # 2. 增量生成: query 只包含“本轮新 token”，key/value 则包含“历史缓存 + 新 token”。
+        #    例如 past_len=5, query_len=2 时，第 0 个新 token 可以看到前 6 个 key，
+        #    第 1 个新 token 可以看到前 7 个 key，不能越过自己在当前 chunk 中的位置。
+        num_queries = Q.shape[-2]
+        num_keys = K.shape[-2]
+        past_kv_len = num_keys - num_queries
+        query_positions = torch.arange(
+            num_queries, device=Q.device).unsqueeze(-1)
+        key_positions = torch.arange(num_keys, device=Q.device).unsqueeze(0)
+        causal_mask = key_positions <= (past_kv_len + query_positions)
 
         # Compute attention for each head
         attn_output = scaled_dot_product_attention(Q, K, V, mask=causal_mask)
@@ -283,7 +341,13 @@ class multihead_self_attention(torch.nn.Module):
         attn_output = rearrange(
             attn_output, "... head seq d_k -> ... seq (head d_k)", head=self.num_heads, d_k=d_k)
         out = self.output_proj(attn_output)
-        return out
+
+        if not use_kv_cache:
+            return out
+
+        # 返回更新后的 cache 供下一步解码复用。
+        # 这里直接复用已经裁剪好的 K/V，调用方不需要再额外维护窗口边界。
+        return out, {"k": K.detach(), "v": V.detach()}
 
 
 def silu(x: torch.Tensor) -> torch.Tensor:
@@ -322,7 +386,13 @@ class TransformerBlock(torch.nn.Module):
         self.ffn = PositionWise_FeedForward(
             d_model, d_ff, device=device, dtype=dtype)
 
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor = None,
+        kv_cache: KVCache | None = None,
+        use_kv_cache: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, KVCache]:
         # 如果未提供 token_positions，默认生成 [0, 1, 2, ..., seq_len-1]
         if token_positions is None:
             seq_len = x.shape[-2]
@@ -331,12 +401,24 @@ class TransformerBlock(torch.nn.Module):
         # Pre-norm design:
         # 1) RMSNorm → MHA → residual connection
         normed = self.ln1(x)
-        attn_out = self.attn(normed, token_positions=token_positions)
+        if use_kv_cache:
+            # 只有 attention 子层需要 cache；FFN 是逐位置前馈，不依赖历史 token，
+            # 因此这里仅向 attention 透传/更新缓存。
+            attn_out, next_kv_cache = self.attn(
+                normed,
+                token_positions=token_positions,
+                kv_cache=kv_cache,
+                use_kv_cache=True,
+            )
+        else:
+            attn_out = self.attn(normed, token_positions=token_positions)
         x = x + attn_out
         # 2) RMSNorm → FFN → residual connection
         normed = self.ln2(x)
         ffn_out = self.ffn(normed)
         x = x + ffn_out
+        if use_kv_cache:
+            return x, next_kv_cache
         return x
 
 
@@ -379,25 +461,55 @@ class TransformerLM(torch.nn.Module):
         # LM head (output projection back to vocab)
         self.lm_head = Linear(d_model, vocab_size, device=device, dtype=dtype)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None = None,
+        kv_cache: list[KVCache | None] | None = None,
+        use_kv_cache: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, list[KVCache]]:
         # x: (batch_size, seq_len) — token indices
         seq_len = x.shape[-1]
-        # 生成 position ids: [0, 1, 2, ..., seq_len-1]
-        token_positions = torch.arange(
-            seq_len, device=x.device).unsqueeze(0)  # (1, seq_len)
+        # 训练/普通前向仍然使用 0..seq_len-1 的相对位置。
+        # 增量生成时，decode 会显式传入“绝对位置”，例如 prompt 长度为 128 时，
+        # 下一步新 token 的 position id 应该是 128，而不是重新从 0 开始。
+        # 这是 kv cache 能正确复用 RoPE 后 K/V 的前提。
+        if token_positions is None:
+            token_positions = torch.arange(
+                seq_len, device=x.device).unsqueeze(0)  # (1, seq_len)
+
+        if kv_cache is not None and len(kv_cache) != len(self.layers):
+            raise ValueError(
+                f"kv_cache should have one entry per transformer layer, expected {len(self.layers)} got {len(kv_cache)}"
+            )
 
         # Token embedding
         h = self.token_embeddings(x)  # (batch, seq_len, d_model)
 
         # Pass through transformer blocks
-        for layer in self.layers:
-            h = layer(h, token_positions=token_positions)
+        next_kv_cache: list[KVCache] = []
+        for layer_idx, layer in enumerate(self.layers):
+            layer_cache = None if kv_cache is None else kv_cache[layer_idx]
+            if use_kv_cache:
+                # 每一层的 cache 独立维护，因为不同层的 K/V 来自不同的隐藏状态空间。
+                # 不能把某一层的 cache 误用到另一层，否则注意力会直接读取错误特征。
+                h, updated_layer_cache = layer(
+                    h,
+                    token_positions=token_positions,
+                    kv_cache=layer_cache,
+                    use_kv_cache=True,
+                )
+                next_kv_cache.append(updated_layer_cache)
+            else:
+                h = layer(h, token_positions=token_positions)
 
         # Final normalization
         h = self.ln_final(h)
 
         # Project to vocab size
         logits = self.lm_head(h)  # (batch, seq_len, vocab_size)
+        if use_kv_cache:
+            return logits, next_kv_cache
         return logits
 
 

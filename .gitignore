@@ -163,3 +163,4 @@ cython_debug/
 # data for training and files from pickle
 data/**
 wandb/**
+cs336_systems/benchmark_results.csv
