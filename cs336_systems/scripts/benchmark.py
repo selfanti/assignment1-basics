@@ -30,8 +30,10 @@ RESULT_COLUMNS = [
     "num_heads",
     "d_ff",
     "rope_theta",
+    "attention_backend",
     "device",
     "autocast_bf16",
+    "compile",
     "warmup_steps",
     "run_steps",
     "mean_seconds",
@@ -126,6 +128,7 @@ def build_model(
     d_ff: int,
     rope_theta: float,
     device: str,
+    attention_backend: str,
 ) -> TransformerLM:
     return TransformerLM(
         vocab_size,
@@ -135,6 +138,7 @@ def build_model(
         num_layers,
         num_heads,
         rope_theta,
+        attention_backend=attention_backend,
     ).to(device)
 
 
@@ -150,11 +154,19 @@ def main() -> None:
     parser.add_argument("--num_heads", type=int, default=16, help="number of head")
     parser.add_argument("--d_ff", type=int, default=1344, help="dimension of the ffn")
     parser.add_argument("--memory_profiler", action="store_true", help="use the memory profiler")
+    parser.add_argument(
+        "--attention_backend",
+        type=str,
+        default="standard",
+        choices=("standard", "flash_attention_v2"),
+        help="attention implementation to benchmark: the original eager path or the FlashAttention-v2-style SDPA path",
+    )
     parser.add_argument("--rope_theta", type=float, default=10000, help="rope theta ")
     parser.add_argument("--device", type=str, default="cuda:0", help="device of the training")
     parser.add_argument("--warmup_steps", type=int, default=10, help="steps of warm up")
     parser.add_argument("--run_steps", type=int, default=20, help="steps of measurement")
     parser.add_argument("--forward_only", action="store_true", help="only for the time of running the forward")
+    parser.add_argument("--compile", action="store_true", help="compile the whole model")
     parser.add_argument(
         "--results_file",
         type=Path,
@@ -174,10 +186,14 @@ def main() -> None:
     model_label = model_size.size if model_size else "custom"
     mode = "forward_only" if args.forward_only else "forward_backward"
 
+    if args.attention_backend == "flash_attention_v2" and device_type != "cuda":
+        raise ValueError("Manual Triton FlashAttention v2 can only be benchmarked on CUDA devices.")
     if args.autocast_bf16 and device_type != "cuda":
         print("warning: --autocast_bf16 only applies to CUDA devices; running without autocast.")
     if args.memory_profiler and device_type != "cuda":
         print("warning: --memory_profiler only applies to CUDA devices; no snapshot will be generated.")
+    if args.attention_backend == "flash_attention_v2" and not args.forward_only:
+        print("note: flash_attention_v2 uses the hand-written Triton kernel for forward and a reference recomputation path for backward.")
 
     data = torch.randint(
         low=0,
@@ -205,7 +221,12 @@ def main() -> None:
         resolved_d_ff,
         args.rope_theta,
         args.device,
+        args.attention_backend,
     )
+    if args.compile:
+        # compile 开关是 benchmark 维度的一部分，需要和 attention_backend 一起记录。
+        # 只有把两者都写进结果行，后续对比时才不会把“后端差异”和“编译差异”混在一起。
+        model = torch.compile(model)
     optimizer = AdamW(model.parameters())
 
     if args.forward_only:
@@ -267,8 +288,10 @@ def main() -> None:
         "num_heads": resolved_num_heads,
         "d_ff": resolved_d_ff,
         "rope_theta": args.rope_theta,
+        "attention_backend": args.attention_backend,
         "device": args.device,
         "autocast_bf16": args.autocast_bf16 and device_type == "cuda",
+        "compile": args.compile,
         "warmup_steps": args.warmup_steps,
         "run_steps": args.run_steps,
         "mean_seconds": mean_seconds,
