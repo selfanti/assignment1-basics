@@ -1,0 +1,59 @@
+_wandb:
+    value:
+        cli_version: 0.25.1
+        e:
+            beuawki3zde5q8o8mt1o0x757lac3cng:
+                args:
+                    - /home/vipuser/assignment1/data/tinystories/tokens.train/tokens.npy
+                    - --batch_size
+                    - "16"
+                    - --lr
+                    - "0.001"
+                    - --epochs
+                    - "80000"
+                    - --context_length
+                    - "256"
+                    - --device
+                    - cuda:0
+                codePath: scripts/train.py
+                codePathLocal: train.py
+                cpu_count: 4
+                cpu_count_logical: 8
+                cudaVersion: "12.4"
+                disk:
+                    /:
+                        total: "213514743808"
+                        used: "62726651904"
+                email: 1752838035@qq.com
+                executable: /home/vipuser/assignment1/.venv/bin/python
+                git:
+                    commit: 3901b76920fc11e8f9517cba2ed4255a56e2f892
+                    remote: https://github.com/selfanti/assignment1-basics.git
+                gpu: NVIDIA GeForce RTX 4090
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 16384
+                      memoryTotal: "51527024640"
+                      name: NVIDIA GeForce RTX 4090
+                      uuid: GPU-ec53074b-3e0f-a16d-b8e8-4fcc2a81d38f
+                host: ubuntu
+                memory:
+                    total: "16718737408"
+                os: Linux-6.8.0-31-generic-x86_64-with-glibc2.39
+                program: /home/vipuser/assignment1/scripts/train.py
+                python: CPython 3.11.7
+                root: /home/vipuser/assignment1/scripts
+                startedAt: "2026-03-24T01:59:08.062033Z"
+                writerId: beuawki3zde5q8o8mt1o0x757lac3cng
+        m: []
+        python_version: 3.11.7
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "4": 3.11.7
+            "5": 0.25.1
+            "12": 0.25.1
+            "13": linux-x86_64

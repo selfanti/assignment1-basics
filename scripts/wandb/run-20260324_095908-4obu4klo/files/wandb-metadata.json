@@ -1,0 +1,53 @@
+{
+  "os": "Linux-6.8.0-31-generic-x86_64-with-glibc2.39",
+  "python": "CPython 3.11.7",
+  "startedAt": "2026-03-24T01:59:08.062033Z",
+  "args": [
+    "/home/vipuser/assignment1/data/tinystories/tokens.train/tokens.npy",
+    "--batch_size",
+    "16",
+    "--lr",
+    "0.001",
+    "--epochs",
+    "80000",
+    "--context_length",
+    "256",
+    "--device",
+    "cuda:0"
+  ],
+  "program": "/home/vipuser/assignment1/scripts/train.py",
+  "codePath": "scripts/train.py",
+  "codePathLocal": "train.py",
+  "git": {
+    "remote": "https://github.com/selfanti/assignment1-basics.git",
+    "commit": "3901b76920fc11e8f9517cba2ed4255a56e2f892"
+  },
+  "email": "1752838035@qq.com",
+  "root": "/home/vipuser/assignment1/scripts",
+  "host": "ubuntu",
+  "executable": "/home/vipuser/assignment1/.venv/bin/python",
+  "cpu_count": 4,
+  "cpu_count_logical": 8,
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "213514743808",
+      "used": "62726651904"
+    }
+  },
+  "memory": {
+    "total": "16718737408"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "51527024640",
+      "cudaCores": 16384,
+      "architecture": "Ada",
+      "uuid": "GPU-ec53074b-3e0f-a16d-b8e8-4fcc2a81d38f"
+    }
+  ],
+  "cudaVersion": "12.4",
+  "writerId": "beuawki3zde5q8o8mt1o0x757lac3cng"
+}
